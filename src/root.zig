@@ -50,20 +50,20 @@ pub const Serializer = struct {
     pos: usize = 0, // byte position
     bit_offset: u8 = 0, // bit offset within current byte (0-7)
 
-    pub fn serialize_int(self: *Serializer, comptime T: type, value: T) !void {
+    pub fn serializeInt(self: *Serializer, comptime T: type, value: T) !void {
         const info = @typeInfo(T);
         switch (info) {
             .int => |i| {
                 const bits: u8 = @intCast(i.bits);
                 switch (i.signedness) {
-                    .signed => try self.serialize_signed(@intCast(value), bits),
-                    .unsigned => try self.serialize_unsigned(@intCast(value), bits),
+                    .signed => try self.serializeSigned(@intCast(value), bits),
+                    .unsigned => try self.serializeUnsigned(@intCast(value), bits),
                 }
             },
             else => unreachable,
         }
     }
-    pub fn serialize_float(self: *Serializer, comptime T: type, value: T) !void {
+    pub fn serializeFloat(self: *Serializer, comptime T: type, value: T) !void {
         const info = @typeInfo(T);
         switch (info) {
             .float => |f| {
@@ -96,7 +96,7 @@ pub const Serializer = struct {
         }
     }
 
-    fn serialize_unsigned(self: *Serializer, value: u64, bits: u8) !void {
+    fn serializeUnsigned(self: *Serializer, value: u64, bits: u8) !void {
         // Write `bits` bits of `value` in big-endian bit order
         var remaining = bits;
         const bit_value = value;
@@ -122,38 +122,33 @@ pub const Serializer = struct {
         }
     }
 
-    fn serialize_signed(self: *Serializer, value: i64, bits: u8) !void {
+    fn serializeSigned(self: *Serializer, value: i64, bits: u8) !void {
         // Reinterpret as two's-complement unsigned
         const uv: u64 = @bitCast(value);
-        try self.serialize_unsigned(uv, bits);
+        try self.serializeUnsigned(uv, bits);
     }
 
-    pub fn serialize_slice(self: *Serializer, comptime T: type, comptime depl: ArrayDeployment, value: []const T) !void {
-        const length: usize = value.len;
-        // write length according to requested width with bounds checking
-        switch (depl.lengthWidth) {
+    pub fn serializeLength(self: *Serializer, comptime widthType: Width, size: usize) !void {
+        switch (widthType) {
             .U8 => {
-                if (length > 0xFF) return SerializeError.BufferOverflow;
-                try self.serialize_unsigned(@as(u64, length), 8);
+                if (size > 0xFF) return SerializeError.BufferOverflow;
+                try self.serializeUnsigned(@as(u64, size), 8);
             },
             .U16 => {
-                if (length > 0xFFFF) return SerializeError.BufferOverflow;
-                try self.serialize_unsigned(@as(u64, length), 16);
+                if (size > 0xFFFF) return SerializeError.BufferOverflow;
+                try self.serializeUnsigned(@as(u64, size), 16);
             },
             .U32 => {
-                if (length > 0xFFFF_FFFF) return SerializeError.BufferOverflow;
-                try self.serialize_unsigned(@as(u64, length), 32);
+                if (size > 0xFFFF_FFFF) return SerializeError.BufferOverflow;
+                try self.serializeUnsigned(@as(u64, size), 32);
             },
         }
-
-        for (value) |element| {
-            try serialize(null, element, self);
-        }
     }
-    pub fn serialize_array(self: *Serializer, comptime T: type, comptime Size: usize, value: [Size]T) !void {
-        for (value) |element| {
-            try serialize(null, element, self);
-        }
+    fn patchWidth(self: *Serializer, comptime widthType: Width, pos: usize, size: usize) !void {
+        const current_pos = self.pos;
+        self.pos = pos;
+        try self.serializeLength(widthType, size);
+        self.pos = current_pos;
     }
 };
 
@@ -165,54 +160,101 @@ const SerializeError = error{
 };
 
 pub fn serialize(comptime depl: ?Deployment, value: anytype, serializer: *Serializer) !void {
-    try serializeImpl(@TypeOf(value), depl, value, serializer);
+    try CompoundTypeSerializer.serialize(@TypeOf(value), depl, value, serializer);
 }
 
-pub fn serializeImpl(comptime T: type, comptime depl: ?Deployment, value: T, serializer: *Serializer) !void {
-    const info = @typeInfo(T);
+const CompoundTypeSerializer = struct {
+    pub fn serialize(comptime T: type, comptime depl: ?Deployment, value: T, serializer: *Serializer) !void {
+        const info = @typeInfo(T);
 
-    switch (info) {
-        .@"struct" => |s| {
-            std.debug.print("Serialize Struct: {s}\n", .{@typeName(T)});
-            const field_depls = switch (depl orelse Deployment{ .struct_depl = StructDeployment{ .field_depls = &[0]Deployment{} } }) {
-                .struct_depl => |struct_depl| struct_depl.field_depls,
-                else => unreachable,
-            };
-            inline for (0..s.fields.len) |i| {
-                try serializeImpl(s.fields[i].type, field_depls[i], @field(value, s.fields[i].name), serializer);
-            }
-        },
-        .@"union" => |u| {
-            std.debug.print("Serialize Union: {s}\n", .{@typeName(T)});
-            std.debug.print("Name: ", .{u.tag_type});
-        },
-        .int => {
-            std.debug.print("Serialize Integer: {s}\n", .{@typeName(T)});
-            try serializer.serialize_int(T, value);
-        },
-        .float => {
-            std.debug.print("Serialize Float: {s}\n", .{@typeName(T)});
-            try serializer.serialize_float(T, value);
-        },
-        .array => |a| {
-            std.debug.print("Serialize Array: {s}\n", .{@typeName(T)});
-            try serializer.serialize_array(a.child, a.len, value);
-        },
-        .pointer => |p| {
-            if (p.size == .slice) {
-                const array_depl = switch (depl orelse Deployment{ .array_depl = ArrayDeployment{} }) {
-                    .array_depl => |array_depl| array_depl,
-                    else => {
-                        return .WrongDeployment;
-                    },
+        switch (info) {
+            .@"struct" => {
+                const struct_depl = switch (depl orelse Deployment{ .struct_depl = StructDeployment{} }) {
+                    .struct_depl => |struct_depl| struct_depl,
+                    else => StructDeployment{},
                 };
-                std.debug.print("Serialize Slice: {s}\n", .{@typeName(T)});
-                const slice = @as([]const p.child, value);
-                try serializer.serialize_slice(p.child, array_depl, slice);
-            } else {
-                return SerializeError.InvalidType;
-            }
-        },
-        else => return SerializeError.InvalidType,
+                try CompoundTypeSerializer.serializeStruct(@TypeOf(value), struct_depl, serializer, value);
+            },
+            .@"union" => |u| {
+                std.debug.print("Serialize Union: {s}\n", .{@typeName(T)});
+                std.debug.print("Name: ", .{u.tag_type});
+                const union_depl = switch (depl orelse Deployment{ .union_depl = UnionDeployment{} }) {
+                    .union_depl => |union_depl| union_depl,
+                    else => unreachable,
+                };
+                try CompoundTypeSerializer.serializeUnion(@TypeOf(value), union_depl, serializer, value);
+            },
+            .int => {
+                std.debug.print("Serialize Integer: {s}\n", .{@typeName(T)});
+                try serializer.serializeInt(T, value);
+            },
+            .float => {
+                std.debug.print("Serialize Float: {s}\n", .{@typeName(T)});
+                try serializer.serializeFloat(T, value);
+            },
+            .array => |a| {
+                std.debug.print("Serialize Array: {s}\n", .{@typeName(T)});
+                try CompoundTypeSerializer.serializeArray(a.child, a.len, value);
+            },
+            .pointer => |p| {
+                if (p.size == .slice) {
+                    const array_depl = switch (depl orelse Deployment{ .array_depl = ArrayDeployment{} }) {
+                        .array_depl => |array_depl| array_depl,
+                        else => {
+                            return .WrongDeployment;
+                        },
+                    };
+                    std.debug.print("Serialize Slice: {s}\n", .{@typeName(T)});
+                    const slice = @as([]const p.child, value);
+                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, array_depl, slice);
+                } else {
+                    return SerializeError.InvalidType;
+                }
+            },
+            else => return SerializeError.InvalidType,
+        }
     }
-}
+
+    pub fn serializeSlice(serializer: *Serializer, comptime T: type, comptime depl: ArrayDeployment, value: []const T) !void {
+        const length_pos = serializer.pos;
+        try serializer.serializeLength(depl.lengthWidth, 0);
+        const start = serializer.pos;
+        for (value) |element| {
+            try CompoundTypeSerializer.serialize(@TypeOf(element), null, element, serializer);
+        }
+        const end = serializer.pos;
+        try serializer.patchWidth(depl.lengthWidth, length_pos, end - start);
+    }
+
+    pub fn serializeArray(serializer: *Serializer, comptime T: type, comptime Size: usize, value: [Size]T) !void {
+        for (value) |element| {
+            try CompoundTypeSerializer.serialize(@TypeOf(element), null, element, serializer);
+        }
+    }
+
+    pub fn serializeStruct(comptime T: type, comptime depl: StructDeployment, serializer: *Serializer, value: T) !void {
+        const info = @typeInfo(T);
+        const s = switch (info) {
+            .@"struct" => |s| s,
+            else => unreachable,
+        };
+
+        inline for (0..s.fields.len) |i| {
+            try CompoundTypeSerializer.serialize(s.fields[i].type, depl.field_depls[i], @field(value, s.fields[i].name), serializer);
+        }
+    }
+
+    pub fn serializeUnion(comptime T: type, comptime depl: UnionDeployment, serializer: *Serializer, value: T) !void {
+        switch (value) {
+            inline else => |payload, tag| {
+                const length_pos = serializer.pos;
+                try serializer.serializeLength(depl.lengthWidth, 0);
+                try serializer.serializeLength(depl.typeWidth, @intFromEnum(tag));
+                const start = serializer.pos;
+                try CompoundTypeSerializer.serialize(@TypeOf(payload), null, payload, serializer);
+                const end = serializer.pos;
+                serializer.patchWidth(depl.lengthWidth, length_pos, end - start);
+            },
+        }
+    }
+};

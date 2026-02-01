@@ -66,14 +66,14 @@ pub fn main() !void {
     // std.debug.print("Nineth byte: {b:0>8}\n", .{a_buffer[8]});
 
     const ArrayMessage = struct {
-        array_a: []u8,
-        array_b: []u8,
+        array_a: []u16,
+        array_b: []u16,
     };
 
     std.debug.print("Serializing width array\n", .{});
-    var bw_buffer: [14]u8 = undefined;
+    var bw_buffer: [22]u8 = undefined;
     @memset(&bw_buffer, 0); // Initialize buffer to 0
-    var bw_array = [_]u8{ 1, 2, 3, 4 };
+    var bw_array = [_]u16{ 1, 2, 3, 4 };
     var bw_serializer = zsomeip_serializer.Serializer{ .payload = &bw_buffer };
     try zsomeip_serializer.serialize(zsomeip_serializer.Deployment{ .struct_depl = zsomeip_serializer.StructDeployment{ .field_depls = &[_]zsomeip_serializer.Deployment{ zsomeip_serializer.Deployment{ .array_depl = zsomeip_serializer.ArrayDeployment{ .lengthWidth = .U16 } }, zsomeip_serializer.Deployment{ .array_depl = zsomeip_serializer.ArrayDeployment{} } } } }, ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] }, &bw_serializer);
     std.debug.print("First byte: {b:0>8}\n", .{bw_buffer[0]});
@@ -90,4 +90,12 @@ pub fn main() !void {
     std.debug.print("Twelveth byte: {b:0>8}\n", .{bw_buffer[11]});
     std.debug.print("Thirteenth byte: {b:0>8}\n", .{bw_buffer[12]});
     std.debug.print("Fourteenth byte: {b:0>8}\n", .{bw_buffer[13]});
+    std.debug.print("Fifteenth byte: {b:0>8}\n", .{bw_buffer[14]});
+    std.debug.print("Sixteenth byte: {b:0>8}\n", .{bw_buffer[15]});
+    std.debug.print("Seventeenth byte: {b:0>8}\n", .{bw_buffer[16]});
+    std.debug.print("Eighteenth byte: {b:0>8}\n", .{bw_buffer[17]});
+    std.debug.print("Nineteenth byte: {b:0>8}\n", .{bw_buffer[18]});
+    std.debug.print("Twenteeth byte: {b:0>8}\n", .{bw_buffer[19]});
+    std.debug.print("Twentyfirst byte: {b:0>8}\n", .{bw_buffer[20]});
+    std.debug.print("Twentysecond byte: {b:0>8}\n", .{bw_buffer[21]});
 }
