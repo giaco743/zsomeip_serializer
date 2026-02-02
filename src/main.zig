@@ -75,7 +75,7 @@ pub fn main() !void {
     @memset(&bw_buffer, 0); // Initialize buffer to 0
     var bw_array = [_]u16{ 1, 2, 3, 4 };
     var bw_serializer = zsomeip_serializer.Serializer{ .payload = &bw_buffer };
-    try zsomeip_serializer.serialize(zsomeip_serializer.Deployment{ .struct_depl = zsomeip_serializer.StructDeployment{ .field_depls = &[_]zsomeip_serializer.Deployment{ zsomeip_serializer.Deployment{ .array_depl = zsomeip_serializer.ArrayDeployment{ .lengthWidth = .U16 } }, zsomeip_serializer.Deployment{ .array_depl = zsomeip_serializer.ArrayDeployment{} } } } }, ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] }, &bw_serializer);
+    try zsomeip_serializer.serialize(zsomeip_serializer.Deployment{ .struct_depl = zsomeip_serializer.StructDeployment{ .field_depls = &[_]zsomeip_serializer.FieldDeployment{zsomeip_serializer.FieldDeployment{ .name = "array_a", .depl = zsomeip_serializer.Deployment{ .array_depl = zsomeip_serializer.ArrayDeployment{ .lengthWidth = .U16 } } }} } }, ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] }, &bw_serializer);
     std.debug.print("First byte: {b:0>8}\n", .{bw_buffer[0]});
     std.debug.print("Second byte: {b:0>8}\n", .{bw_buffer[1]});
     std.debug.print("Third byte: {b:0>8}\n", .{bw_buffer[2]});
