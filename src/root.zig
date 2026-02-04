@@ -12,6 +12,10 @@ pub const ArrayDeployment = struct {
     max: ?u64 = null,
 };
 
+pub fn makeArrayDeployment(comptime opts: ArrayDeployment) Deployment {
+    return Deployment{ .array_depl = opts };
+}
+
 pub const StringDeploymentVariant = union(enum) {
     fixed_string_depl: FixedStringDeployment,
     dynamic_string_depl: DynamicStringDeployment,
@@ -31,6 +35,10 @@ pub const UnionDeployment = struct {
     lengthWidth: Width = .U32,
     typeWidth: Width = .U32,
 };
+
+pub fn makeUnionDeployment(comptime opts: UnionDeployment) Deployment {
+    return Deployment{ .union_depl = opts };
+}
 
 pub const Deployment = union(enum) {
     array_depl: ArrayDeployment,
@@ -57,6 +65,36 @@ pub const StructDeployment = struct {
     }
 };
 
+/// ---------------------
+/// Wraps a raw deployment in the correct Deployment union
+fn wrapDeployment(value: anytype) Deployment {
+    return switch (@TypeOf(value)) {
+        ArrayDeployment => Deployment{ .array_depl = value },
+        StructDeployment => Deployment{ .struct_depl = value },
+        else => @compileError("Unsupported deployment type"),
+    };
+}
+
+pub fn makeStructDeployment(comptime fields: anytype) Deployment {
+    const info = @typeInfo(@TypeOf(fields));
+    const struct_fields = switch (info) {
+        .@"struct" => |struct_info| struct_info.fields,
+        else => @compileError("Can only be made from struct"),
+    };
+    var field_depls: [struct_fields.len]FieldDeployment = undefined;
+
+    inline for (0..struct_fields.len) |i| {
+        const name = struct_fields[i].name;
+        const depl = @field(fields, name);
+        field_depls[i] = FieldDeployment{ .name = name, .depl = wrapDeployment(depl) };
+    }
+
+    const depls = field_depls;
+    return Deployment{
+        .struct_depl = StructDeployment{ .field_depls = &depls },
+    };
+}
+
 /// Caller-owned Serializer: the caller is responsible for managing the buffer
 /// and passing it to init. This keeps the lifetime straightforward.
 pub const Serializer = struct {
@@ -81,7 +119,7 @@ pub const Serializer = struct {
                 if ((info.int.bits % 8) == 0) {
                     const size = @sizeOf(T);
                     if (self.pos + size > self.payload.len)
-                        return .OutOfBounds;
+                        return SerializeError.OutOfBounds;
 
                     const ptr: *[size]u8 = @ptrCast(self.payload[self.pos..].ptr);
                     std.mem.writeInt(T, ptr, value, .big);
@@ -103,7 +141,7 @@ pub const Serializer = struct {
 
         const size = @sizeOf(T);
         if (self.pos + size > self.payload.len)
-            return error.OutOfBounds;
+            return .OutOfBounds;
 
         const ptr: *[size]u8 = @ptrCast(self.payload[self.pos..].ptr);
         std.mem.writeInt(IntT, ptr, bits, .big);
@@ -113,16 +151,16 @@ pub const Serializer = struct {
     pub fn serializeTag(self: *Serializer, comptime widthType: Width, value: usize) !void {
         switch (widthType) {
             .U8 => {
-                if (value > 0xFF) return SerializeError.BufferOverflow;
-                try self.serializeInt(u8, value);
+                const val = std.math.cast(u8, value) orelse return SerializeError.OutOfValueBounds;
+                try self.serializeInt(u8, val);
             },
             .U16 => {
-                if (value > 0xFFFF) return SerializeError.BufferOverflow;
-                try self.serializeInt(u16, value);
+                const val = std.math.cast(u16, value) orelse return SerializeError.OutOfValueBounds;
+                try self.serializeInt(u16, val);
             },
             .U32 => {
-                if (value > 0xFFFF_FFFF) return SerializeError.BufferOverflow;
-                try self.serializeInt(u32, value);
+                const val = std.math.cast(u32, value) orelse return SerializeError.OutOfValueBounds;
+                try self.serializeInt(u32, val);
             },
         }
     }
@@ -140,10 +178,13 @@ const SerializeError = error{
     Unaligned,
     WrongDeployment,
     OutOfBounds,
+    OutOfValueBounds,
 };
 
-pub fn serialize(comptime depl: ?Deployment, value: anytype, serializer: *Serializer) !void {
-    try CompoundTypeSerializer.serialize(@TypeOf(value), depl, value, serializer);
+pub fn serialize(comptime depl: ?Deployment, value: anytype, buffer: []u8) !usize {
+    var serializer = Serializer.init(buffer);
+    try CompoundTypeSerializer.serialize(@TypeOf(value), depl, value, &serializer);
+    return serializer.pos;
 }
 
 const CompoundTypeSerializer = struct {
