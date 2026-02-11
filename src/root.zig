@@ -11,16 +11,6 @@ pub const ArrayDeployment = struct {
     min: ?u64 = null,
     max: ?u64 = null,
 };
-
-pub fn makeArrayDeployment(comptime opts: ArrayDeployment) Deployment {
-    return Deployment{ .array_depl = opts };
-}
-
-pub const StringDeploymentVariant = union(enum) {
-    fixed_string_depl: FixedStringDeployment,
-    dynamic_string_depl: DynamicStringDeployment,
-};
-
 pub const FixedStringDeployment = struct {
     length: u64,
 };
@@ -36,67 +26,8 @@ pub const UnionDeployment = struct {
     typeWidth: Width = .U32,
 };
 
-pub fn makeUnionDeployment(comptime opts: UnionDeployment) Deployment {
-    return Deployment{ .union_depl = opts };
-}
+pub const NoopDeployment = struct {};
 
-pub const Deployment = union(enum) {
-    array_depl: ArrayDeployment,
-    string_depl: StringDeploymentVariant,
-    union_depl: UnionDeployment,
-    struct_depl: StructDeployment,
-};
-
-pub const FieldDeployment = struct {
-    name: []const u8,
-    depl: Deployment,
-};
-
-pub const StructDeployment = struct {
-    field_depls: []const FieldDeployment = &[0]FieldDeployment{},
-
-    pub fn get_field_depl(comptime self: StructDeployment, comptime field_name: []const u8) ?Deployment {
-        for (self.field_depls) |depl| {
-            if (std.mem.eql(u8, depl.name, field_name)) {
-                return depl.depl;
-            }
-        }
-        return null;
-    }
-};
-
-/// ---------------------
-/// Wraps a raw deployment in the correct Deployment union
-fn wrapDeployment(value: anytype) Deployment {
-    return switch (@TypeOf(value)) {
-        ArrayDeployment => Deployment{ .array_depl = value },
-        StructDeployment => Deployment{ .struct_depl = value },
-        else => @compileError("Unsupported deployment type"),
-    };
-}
-
-pub fn makeStructDeployment(comptime fields: anytype) Deployment {
-    const info = @typeInfo(@TypeOf(fields));
-    const struct_fields = switch (info) {
-        .@"struct" => |struct_info| struct_info.fields,
-        else => @compileError("Can only be made from struct"),
-    };
-    var field_depls: [struct_fields.len]FieldDeployment = undefined;
-
-    inline for (0..struct_fields.len) |i| {
-        const name = struct_fields[i].name;
-        const depl = @field(fields, name);
-        field_depls[i] = FieldDeployment{ .name = name, .depl = wrapDeployment(depl) };
-    }
-
-    const depls = field_depls;
-    return Deployment{
-        .struct_depl = StructDeployment{ .field_depls = &depls },
-    };
-}
-
-/// Caller-owned Serializer: the caller is responsible for managing the buffer
-/// and passing it to init. This keeps the lifetime straightforward.
 pub const Serializer = struct {
     payload: []u8,
     pos: usize = 0, // byte position
@@ -170,41 +101,57 @@ pub const Serializer = struct {
         try self.serializeTag(widthType, size);
         self.pos = current_pos;
     }
+    pub fn serializeDynamicString(self: *Serializer, comptime depl: DynamicStringDeployment, value: []const u8) !void {
+        try self.serializeTag(depl.lengthWidth, value.len + 4); // + BOM and null
+        try self.serializeString(value);
+    }
+    pub fn serializeString(self: *Serializer, value: []const u8) !void {
+        if (self.payload[self.pos..].len < value.len + 4) // + BOM + null
+            return .BufferOverflow;
+        const BOM = [3]u8{ 0xEF, 0xBB, 0xBF };
+        self.writeBytes(BOM[0..]);
+        self.writeBytes(value);
+        const NULL = [1]u8{0x00};
+        self.writeBytes(NULL[0..]);
+    }
+    pub fn serializeFixedString(self: *Serializer, comptime length: u64, value: []const u8) !void {
+        if (value.len != length)
+            return .OutOfBounds;
+        try self.serializeString(value);
+    }
+    pub fn writeBytes(self: *Serializer, bytes: []const u8) !void {
+        if (self.pos + bytes.len > self.payload.len)
+            return SerializeError.OutOfBounds;
+        std.mem.copy(u8, self.payload[self.pos .. self.pos + bytes.len], bytes);
+        self.pos += bytes.len;
+    }
 };
 
 const SerializeError = error{
     InvalidType,
     BufferOverflow,
     Unaligned,
-    WrongDeployment,
     OutOfBounds,
     OutOfValueBounds,
 };
 
-pub fn serialize(comptime depl: ?Deployment, value: anytype, buffer: []u8) !usize {
+pub fn serialize(comptime Depl: anytype, value: anytype, buffer: []u8) !usize {
     var serializer = Serializer.init(buffer);
-    try CompoundTypeSerializer.serialize(@TypeOf(value), depl, value, &serializer);
+    try CompoundTypeSerializer.serialize(@TypeOf(value), Depl, value, &serializer);
     return serializer.pos;
 }
 
 const CompoundTypeSerializer = struct {
-    pub fn serialize(comptime T: type, comptime depl: ?Deployment, value: T, serializer: *Serializer) !void {
+    pub fn serialize(comptime T: type, comptime Depl: anytype, value: T, serializer: *Serializer) !void {
         const info = @typeInfo(T);
 
         switch (info) {
-            .@"struct" => {
-                const struct_depl = switch (depl orelse Deployment{ .struct_depl = StructDeployment{} }) {
-                    .struct_depl => |struct_depl| struct_depl,
-                    else => StructDeployment{},
-                };
-                try CompoundTypeSerializer.serializeStruct(@TypeOf(value), struct_depl, serializer, value);
-            },
+            .@"struct" => try CompoundTypeSerializer.serializeStruct(@TypeOf(value), Depl, serializer, value),
             .@"union" => {
-                const union_depl = switch (depl orelse Deployment{ .union_depl = UnionDeployment{} }) {
-                    .union_depl => |union_depl| union_depl,
-                    else => unreachable,
-                };
-                try CompoundTypeSerializer.serializeUnion(@TypeOf(value), union_depl, serializer, value);
+                if (@TypeOf(Depl) != UnionDeployment) {
+                    @compileError("Wrong deployment");
+                }
+                try CompoundTypeSerializer.serializeUnion(@TypeOf(value), Depl, serializer, value);
             },
             .int => {
                 try serializer.serializeInt(T, value);
@@ -217,19 +164,31 @@ const CompoundTypeSerializer = struct {
             },
             .pointer => |p| {
                 if (p.size == .slice) {
-                    const array_depl = switch (depl orelse Deployment{ .array_depl = ArrayDeployment{} }) {
-                        .array_depl => |array_depl| array_depl,
-                        else => {
-                            return .WrongDeployment;
-                        },
-                    };
-                    const slice = @as([]const p.child, value);
-                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, array_depl, slice);
-                } else {
-                    return SerializeError.InvalidType;
+                    if (p.child == u8) {
+                        switch (@TypeOf(Depl)) {
+                            FixedStringDeployment => {
+                                try serializer.serializeFixedString(Depl.length, value);
+                            },
+                            DynamicStringDeployment => {
+                                try serializer.serializeDynamicString(Depl, value);
+                            },
+                            ArrayDeployment => {
+                                try CompoundTypeSerializer.serializeSlice(serializer, p.child, Depl, value);
+                            },
+                            else => {
+                                @compileError("Wrong deployment");
+                            },
+                        }
+                        return;
+                    }
                 }
+                if (@TypeOf(Depl) != ArrayDeployment) {
+                    @compileError("Wrong deployment");
+                }
+                const slice = @as([]const p.child, value);
+                try CompoundTypeSerializer.serializeSlice(serializer, p.child, Depl, slice);
             },
-            else => return SerializeError.InvalidType,
+            else => @compileError("Unsupported type"),
         }
     }
 
@@ -238,7 +197,7 @@ const CompoundTypeSerializer = struct {
         try serializer.serializeTag(depl.lengthWidth, 0);
         const start = serializer.pos;
         for (value) |element| {
-            try CompoundTypeSerializer.serialize(@TypeOf(element), null, element, serializer);
+            try CompoundTypeSerializer.serialize(@TypeOf(element), NoopDeployment, element, serializer);
         }
         const end = serializer.pos;
         try serializer.patchTag(depl.lengthWidth, length_pos, end - start);
@@ -246,19 +205,31 @@ const CompoundTypeSerializer = struct {
 
     pub fn serializeArray(serializer: *Serializer, comptime T: type, comptime Size: usize, value: [Size]T) !void {
         for (value) |element| {
-            try CompoundTypeSerializer.serialize(@TypeOf(element), null, element, serializer);
+            try CompoundTypeSerializer.serialize(@TypeOf(element), NoopDeployment, element, serializer);
         }
     }
 
-    pub fn serializeStruct(comptime T: type, comptime depl: StructDeployment, serializer: *Serializer, value: T) !void {
-        const info = @typeInfo(T);
-        const s = switch (info) {
+    pub fn serializeStruct(comptime T: type, comptime Depl: anytype, serializer: *Serializer, value: T) !void {
+        const s = switch (@typeInfo(T)) {
             .@"struct" => |s| s,
             else => unreachable,
         };
 
-        inline for (0..s.fields.len) |i| {
-            try CompoundTypeSerializer.serialize(s.fields[i].type, depl.get_field_depl(s.fields[i].name), @field(value, s.fields[i].name), serializer);
+        inline for (s.fields) |field| {
+            const field_value = @field(value, field.name);
+
+            const field_depl =
+                if (@hasField(@TypeOf(Depl), field.name))
+                    @field(Depl, field.name)
+                else
+                    NoopDeployment;
+
+            try CompoundTypeSerializer.serialize(
+                field.type,
+                field_depl,
+                field_value,
+                serializer,
+            );
         }
     }
 
@@ -269,7 +240,7 @@ const CompoundTypeSerializer = struct {
                 try serializer.serializeTag(depl.lengthWidth, 0);
                 try serializer.serializeTag(depl.typeWidth, @intFromEnum(tag));
                 const start = serializer.pos;
-                try CompoundTypeSerializer.serialize(@TypeOf(payload), null, payload, serializer);
+                try CompoundTypeSerializer.serialize(@TypeOf(payload), NoopDeployment, payload, serializer);
                 const end = serializer.pos;
                 serializer.patchTag(depl.lengthWidth, length_pos, end - start);
             },

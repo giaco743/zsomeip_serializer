@@ -74,7 +74,7 @@ pub fn main() !void {
     var buffer: [22]u8 = undefined;
     @memset(&buffer, 0); // Initialize buffer to 0
     var bw_array = [_]u16{ 1, 2, 3, 4 };
-    _ = try zsomeip_serializer.serialize(zsomeip_serializer.makeStructDeployment(.{ .array_a = zsomeip_serializer.ArrayDeployment{ .lengthWidth = .U16 } }), ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] }, buffer[0..]);
+    _ = try zsomeip_serializer.serialize(.{ .array_a = zsomeip_serializer.ArrayDeployment{ .lengthWidth = zsomeip_serializer.Width.U16 }, .array_b = zsomeip_serializer.ArrayDeployment{ .lengthWidth = zsomeip_serializer.Width.U16 } }, ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] }, buffer[0..]);
     std.debug.print("First byte: {b:0>8}\n", .{buffer[0]});
     std.debug.print("Second byte: {b:0>8}\n", .{buffer[1]});
     std.debug.print("Third byte: {b:0>8}\n", .{buffer[2]});
