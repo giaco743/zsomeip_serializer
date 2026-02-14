@@ -11,7 +11,9 @@ test "default deployment" {
 
     const slice = try allocator.alloc(u8, 100);
     defer allocator.free(slice);
-    const size = try zsip.serialize(zsip.makeDynamicStringDeployment(.{}), "Hello", slice[0..]);
+    const text = "Hello";
+    const DeployedText = zsip.Deployed(@TypeOf(text[0..]), zsip.DynamicStringDeployment{});
+    const size = try zsip.serialize(DeployedText.init(text[0..]), slice[0..]);
 
     try std.testing.expectEqualSlices(u8, slice[0..size], expected);
 }

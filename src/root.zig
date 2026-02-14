@@ -135,29 +135,47 @@ const SerializeError = error{
     OutOfValueBounds,
 };
 
-pub fn serialize(comptime Depl: anytype, value: anytype, buffer: []u8) !usize {
+pub fn serialize(value: anytype, buffer: []u8) !usize {
     var serializer = Serializer.init(buffer);
-    try CompoundTypeSerializer.serialize(@TypeOf(value), Depl, value, &serializer);
+    try CompoundTypeSerializer.serialize(@TypeOf(value), value, &serializer);
     return serializer.pos;
 }
 
+pub fn is_deployed(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => @hasDecl(T, "Inner") and @hasDecl(T, "Depl"),
+        else => false,
+    };
+}
+
 const CompoundTypeSerializer = struct {
-    pub fn serialize(comptime T: type, comptime Depl: anytype, value: T, serializer: *Serializer) !void {
-        const info = @typeInfo(T);
+    pub fn serialize(comptime T: type, value: T, serializer: *Serializer) !void {
+        const deployed = comptime is_deployed(T);
+
+        const ActualType = comptime if (deployed) T.Inner else T;
+
+        const info = @typeInfo(ActualType);
 
         switch (info) {
-            .@"struct" => try CompoundTypeSerializer.serializeStruct(@TypeOf(value), Depl, serializer, value),
-            .@"union" => {
-                if (@TypeOf(Depl) != UnionDeployment) {
-                    @compileError("Wrong deployment");
+            .@"struct" => {
+                if (deployed) {
+                    try CompoundTypeSerializer.serializeStruct(ActualType, T.Depl, serializer, value.value);
+                } else {
+                    try CompoundTypeSerializer.serializeStruct(ActualType, struct {}{}, serializer, value);
                 }
-                try CompoundTypeSerializer.serializeUnion(@TypeOf(value), Depl, serializer, value);
+            },
+            .@"union" => {
+                if (deployed) {
+                    try CompoundTypeSerializer.serializeUnion(ActualType, T.Depl, serializer, value.value);
+                } else {
+                    try CompoundTypeSerializer.serializeUnion(ActualType, .{}, serializer, value);
+                }
             },
             .int => {
-                try serializer.serializeInt(T, value);
+                try serializer.serializeInt(ActualType, value);
             },
             .float => {
-                try serializer.serializeFloat(T, value);
+                try serializer.serializeFloat(ActualType, value);
             },
             .array => |a| {
                 try CompoundTypeSerializer.serializeArray(a.child, a.len, value);
@@ -165,28 +183,24 @@ const CompoundTypeSerializer = struct {
             .pointer => |p| {
                 if (p.size == .slice) {
                     if (p.child == u8) {
-                        switch (@TypeOf(Depl)) {
-                            FixedStringDeployment => {
-                                try serializer.serializeFixedString(Depl.length, value);
-                            },
-                            DynamicStringDeployment => {
-                                try serializer.serializeDynamicString(Depl, value);
-                            },
-                            ArrayDeployment => {
-                                try CompoundTypeSerializer.serializeSlice(serializer, p.child, Depl, value);
-                            },
-                            else => {
-                                @compileError("Wrong deployment");
-                            },
+                        if (deployed) {
+                            switch (T.Depl) {
+                                FixedStringDeployment => |depl| try serializer.serializeFixedString(depl.length, value.value),
+                                DynamicStringDeployment => |depl| try serializer.serializeDynamicString(depl, value.value),
+                                ArrayDeployment => |depl| try CompoundTypeSerializer.serializeSlice(serializer, p.child, depl, value.value),
+                                else => try serializer.serializeDynamicString(.{}, value.value),
+                            }
                         }
                         return;
                     }
                 }
-                if (@TypeOf(Depl) != ArrayDeployment) {
-                    @compileError("Wrong deployment");
+                if (deployed) {
+                    const slice = @as([]const p.child, value.value);
+                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, slice);
+                } else {
+                    const slice = @as([]const p.child, value);
+                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, .{}, slice);
                 }
-                const slice = @as([]const p.child, value);
-                try CompoundTypeSerializer.serializeSlice(serializer, p.child, Depl, slice);
             },
             else => @compileError("Unsupported type"),
         }
@@ -197,7 +211,7 @@ const CompoundTypeSerializer = struct {
         try serializer.serializeTag(depl.lengthWidth, 0);
         const start = serializer.pos;
         for (value) |element| {
-            try CompoundTypeSerializer.serialize(@TypeOf(element), NoopDeployment, element, serializer);
+            try CompoundTypeSerializer.serialize(@TypeOf(element), element, serializer);
         }
         const end = serializer.pos;
         try serializer.patchTag(depl.lengthWidth, length_pos, end - start);
@@ -205,7 +219,7 @@ const CompoundTypeSerializer = struct {
 
     pub fn serializeArray(serializer: *Serializer, comptime T: type, comptime Size: usize, value: [Size]T) !void {
         for (value) |element| {
-            try CompoundTypeSerializer.serialize(@TypeOf(element), NoopDeployment, element, serializer);
+            try CompoundTypeSerializer.serialize(@TypeOf(element), element, serializer);
         }
     }
 
@@ -218,18 +232,20 @@ const CompoundTypeSerializer = struct {
         inline for (s.fields) |field| {
             const field_value = @field(value, field.name);
 
-            const field_depl =
-                if (@hasField(@TypeOf(Depl), field.name))
-                    @field(Depl, field.name)
-                else
-                    NoopDeployment;
-
-            try CompoundTypeSerializer.serialize(
-                field.type,
-                field_depl,
-                field_value,
-                serializer,
-            );
+            if (@hasField(@TypeOf(Depl), field.name)) {
+                const DeployedField = Deployed(@TypeOf(field_value), @field(Depl, field.name));
+                try CompoundTypeSerializer.serialize(
+                    DeployedField,
+                    DeployedField.wrap(field_value),
+                    serializer,
+                );
+            } else {
+                try CompoundTypeSerializer.serialize(
+                    @TypeOf(field_value),
+                    field_value,
+                    serializer,
+                );
+            }
         }
     }
 
@@ -240,10 +256,25 @@ const CompoundTypeSerializer = struct {
                 try serializer.serializeTag(depl.lengthWidth, 0);
                 try serializer.serializeTag(depl.typeWidth, @intFromEnum(tag));
                 const start = serializer.pos;
-                try CompoundTypeSerializer.serialize(@TypeOf(payload), NoopDeployment, payload, serializer);
+                try CompoundTypeSerializer.serialize(@TypeOf(payload), payload, serializer);
                 const end = serializer.pos;
                 serializer.patchTag(depl.lengthWidth, length_pos, end - start);
             },
         }
     }
 };
+
+pub fn Deployed(comptime T: type, comptime depl: anytype) type {
+    const Base = if (is_deployed(T)) T.Inner else T;
+
+    return struct {
+        value: Base,
+        pub const Inner = Base;
+        pub const Depl = depl;
+        pub const Self = @This();
+
+        pub fn wrap(val: T) Self {
+            return .{ .value = if (comptime is_deployed(T)) val.value else val };
+        }
+    };
+}
