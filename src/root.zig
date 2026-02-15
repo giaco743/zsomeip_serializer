@@ -107,22 +107,22 @@ pub const Serializer = struct {
     }
     pub fn serializeString(self: *Serializer, value: []const u8) !void {
         if (self.payload[self.pos..].len < value.len + 4) // + BOM + null
-            return .BufferOverflow;
+            return SerializeError.BufferOverflow;
         const BOM = [3]u8{ 0xEF, 0xBB, 0xBF };
-        self.writeBytes(BOM[0..]);
-        self.writeBytes(value);
+        try self.writeBytes(BOM[0..]);
+        try self.writeBytes(value);
         const NULL = [1]u8{0x00};
-        self.writeBytes(NULL[0..]);
+        try self.writeBytes(NULL[0..]);
     }
     pub fn serializeFixedString(self: *Serializer, comptime length: u64, value: []const u8) !void {
         if (value.len != length)
-            return .OutOfBounds;
+            return SerializeError.OutOfBounds;
         try self.serializeString(value);
     }
     pub fn writeBytes(self: *Serializer, bytes: []const u8) !void {
         if (self.pos + bytes.len > self.payload.len)
             return SerializeError.OutOfBounds;
-        std.mem.copy(u8, self.payload[self.pos .. self.pos + bytes.len], bytes);
+        @memcpy(self.payload[self.pos .. self.pos + bytes.len], bytes);
         self.pos += bytes.len;
     }
 };
@@ -184,22 +184,31 @@ const CompoundTypeSerializer = struct {
                 if (p.size == .slice) {
                     if (p.child == u8) {
                         if (deployed) {
-                            switch (T.Depl) {
-                                FixedStringDeployment => |depl| try serializer.serializeFixedString(depl.length, value.value),
-                                DynamicStringDeployment => |depl| try serializer.serializeDynamicString(depl, value.value),
-                                ArrayDeployment => |depl| try CompoundTypeSerializer.serializeSlice(serializer, p.child, depl, value.value),
-                                else => try serializer.serializeDynamicString(.{}, value.value),
+                            if (@TypeOf(T.Depl) == DynamicStringDeployment) {
+                                try serializer.serializeDynamicString(T.Depl, value.value);
+                            } else if (@TypeOf(T.Depl) == FixedStringDeployment) {
+                                try serializer.serializeFixedString(T.Depl.length, value.value);
+                            } else if (@TypeOf(T.Depl) == ArrayDeployment) {
+                                try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, value.value);
+                            } else {
+                                @compileError("Wrong deployment");
                             }
+                        } else {
+                            try serializer.serializeDynamicString(DynamicStringDeployment{}, value.value);
                         }
                         return;
                     }
-                }
-                if (deployed) {
-                    const slice = @as([]const p.child, value.value);
-                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, slice);
+                    if (deployed) {
+                        try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, value.value);
+                    } else {
+                        try CompoundTypeSerializer.serializeSlice(serializer, p.child, .{}, value);
+                    }
                 } else {
-                    const slice = @as([]const p.child, value);
-                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, .{}, slice);
+                    comptime {
+                        var buf: [64]u8 = undefined;
+                        const msg = try std.fmt.bufPrint(&buf, "Only pointers to slices are valid, got: {d}!", .{p.size});
+                        @compileError(msg);
+                    }
                 }
             },
             else => @compileError("Unsupported type"),

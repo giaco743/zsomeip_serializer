@@ -8,11 +8,11 @@ test "default deployment" {
         c: u32,
     };
     const DeployedTest = zsip.Deployed(Test, struct {}{});
-    const givenStruct = DeployedTest{ .value = Test{
+    const givenStruct = DeployedTest.wrap(Test{
         .a = 0x12,
         .b = 0x3456,
         .c = 0x789ABCDE,
-    } };
+    });
     const expected = &[_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE };
 
     var buffer = [_]u8{0} ** 1024;
