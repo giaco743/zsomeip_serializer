@@ -22,7 +22,7 @@ test "default deployment" {
 
     const slice = try allocator.alloc(u8, 100);
     defer allocator.free(slice);
-    const size = try zsip.serialize(givenStruct, slice[0..]);
+    const size = try zsip.serialize.serialize(givenStruct, slice[0..]);
 
     try std.testing.expectEqualSlices(u8, slice[0..size], expected);
 }
