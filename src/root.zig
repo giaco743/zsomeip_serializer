@@ -1,5 +1,6 @@
 const std = @import("std");
 pub const serialize = @import("serialize.zig");
+pub const deserialize = @import("deserialize.zig");
 
 pub const SerializeError = error{
     InvalidType,
@@ -7,6 +8,9 @@ pub const SerializeError = error{
     Unaligned,
     OutOfBounds,
     OutOfValueBounds,
+    BomMissing,
+    NullMissing,
+    InvalidLength,
 };
 
 pub const Width = enum {

@@ -98,4 +98,12 @@ pub fn main() !void {
     std.debug.print("Twenteeth byte: {b:0>8}\n", .{buffer[19]});
     std.debug.print("Twentyfirst byte: {b:0>8}\n", .{buffer[20]});
     std.debug.print("Twentysecond byte: {b:0>8}\n", .{buffer[21]});
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var deser = zsomeip_serializer.deserialize.Deserializer.init(gpa.allocator(), &buffer);
+    defer deser.deinit();
+
+    const message = try deser.deserialize(DeployedArrayMessage);
+    std.debug.print("Deserialized {}", .{message});
 }

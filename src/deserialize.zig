@@ -1,0 +1,221 @@
+const std = @import("std");
+const root = @import("root.zig");
+
+pub const Deserializer = struct {
+    arena: std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
+    input: []u8,
+    pos: usize = 0, // byte position
+    bit_offset: u8 = 0, // bit offset within current byte (0-7)
+
+    pub fn init(allocator: std.mem.Allocator, input: []u8) Deserializer {
+        const arena = std.heap.ArenaAllocator.init(allocator);
+        return Deserializer{
+            .arena = arena,
+            .allocator = allocator,
+            .input = input,
+            .pos = 0,
+            .bit_offset = 0,
+        };
+    }
+
+    pub fn deinit(self: *Deserializer) void {
+        self.arena.deinit();
+    }
+
+    pub fn deserializeInt(self: *Deserializer, comptime T: type) !T {
+        const info = @typeInfo(T);
+        switch (info) {
+            .int => {
+                if ((info.int.bits % 8) == 0) {
+                    const size = @sizeOf(T);
+                    if (self.pos + size > self.input.len)
+                        return root.SerializeError.OutOfBounds;
+
+                    const ptr: *[size]u8 = @ptrCast(self.input[self.pos..].ptr);
+                    const result = std.mem.readInt(T, ptr, .big);
+                    self.pos += size;
+                    return result;
+                } else {
+                    @compileError("Bit sized integers are not yet supported");
+                }
+            },
+            else => @compileError("T must be an integer type"),
+        }
+    }
+    pub fn deserializeFloat(self: *Deserializer, comptime T: type) !T {
+        const info = @typeInfo(T);
+        if (info != .float)
+            @compileError("T must be a float type");
+
+        const IntT = std.meta.Int(.unsigned, @bitSizeOf(T));
+
+        const size = @sizeOf(T);
+        if (self.pos + size > self.input.len)
+            return root.SerializeError.OutOfBounds;
+
+        const ptr: *[size]u8 = @ptrCast(self.input[self.pos..].ptr);
+        const resultAsInt = std.mem.re(IntT, ptr, .big);
+        self.pos += size;
+        return @bitCast(resultAsInt);
+    }
+
+    pub fn deserializeTag(self: *Deserializer, comptime widthType: root.Width) !WidthToType(widthType) {
+        switch (widthType) {
+            .U8 => {
+                const result: u8 = try self.deserializeInt(WidthToType(widthType));
+                return result;
+            },
+            .U16 => {
+                const result: u16 = try self.deserializeInt(WidthToType(widthType));
+                return result;
+            },
+            .U32 => {
+                const result: u32 = try self.deserializeInt(WidthToType(widthType));
+                return result;
+            },
+        }
+    }
+    pub fn deserializeString(self: *Deserializer, length: usize) ![]const u8 {
+        if (self.input[self.pos..].len < length)
+            return root.SerializeError.BufferOverflow;
+        const BOM = [3]u8{ 0xEF, 0xBB, 0xBF };
+        if (std.mem.eql(u8, self.input[self.pos .. self.pos + 3], BOM))
+            return root.SerializeError.BomMissing;
+        if (std.mem.eqal(u8, self.input[self.input.pos + length], 0))
+            return root.SerializeError.NullMissing;
+        const result = self.input[self.pos + 3 .. self.pos + (length - 1)];
+        self.pos += length;
+        return result;
+    }
+    pub fn deserializeDynamicString(self: *Deserializer, comptime depl: root.DynamicStringDeployment) ![]const u8 {
+        const length = try self.deserializeTag(depl.lengthWidth);
+        return try self.deserializeString(length);
+    }
+    pub fn deserializeFixedString(self: *Deserializer, comptime length: u64) ![]const u8 {
+        return try self.deserializeString(length);
+    }
+    pub fn deserializeArray(self: *Deserializer, comptime T: type, comptime Size: usize) ![Size]T {
+        var buffer: [Size]T = undefined;
+        for (0..Size) |i| {
+            buffer[i] = try self.deserialize();
+        }
+        return buffer;
+    }
+    pub fn deserializeSlice(self: *Deserializer, comptime T: type, comptime depl: root.ArrayDeployment) (root.SerializeError || error{OutOfMemory})![]T {
+        const size = try self.deserializeTag(depl.lengthWidth);
+        // Check that byteLength is a multiple of element size
+        if (size % @sizeOf(T) != 0) {
+            return root.SerializeError.InvalidLength; // your custom error
+        }
+        const length = size / @sizeOf(T);
+        var slice = try self.arena.allocator().alloc(T, length);
+
+        for (slice[0..]) |*elem| {
+            elem.* = try self.deserialize(T);
+        }
+
+        return slice;
+    }
+    pub fn deserializeUnion(self: *Deserializer, comptime T: type, comptime depl: root.UnionDeployment) (root.SerializeError || error{OutOfMemory})!T {
+        const info = @typeInfo(T);
+        if (info != .@"union")
+            @compileError("T must be a float type");
+        _ = try self.deserializeTag(depl.lengthWidth);
+        const discriminant = try self.deserializeTag(depl.typeWidth);
+        return try self.deserialize(info.@"union".fields[discriminant - 1]);
+    }
+    pub fn deserialize(self: *Deserializer, comptime T: type) !StripDeployment(T) {
+        const deployed = comptime root.is_deployed(T);
+
+        const ActualType = comptime if (deployed) T.Inner else T;
+
+        const info = @typeInfo(ActualType);
+        switch (info) {
+            .@"struct" => |s| {
+                var result: ActualType = undefined;
+                inline for (s.fields) |field| {
+                    if (@hasField(@TypeOf(T.Depl), field.name)) {
+                        const DeployedField = root.Deployed(field.type, @field(T.Depl, field.name));
+                        const field_value = try self.deserialize(DeployedField);
+                        @field(result, field.name) = field_value;
+                    } else {
+                        @field(result, field.name) = try self.deserialize(T);
+                    }
+                }
+                return result;
+            },
+            .@"union" => {
+                if (deployed) {
+                    if (@TypeOf(T.Depl) != root.UnionDeployment) {
+                        @compileError("Wrong deployment for union");
+                    }
+                    return try self.deserializeUnion(ActualType, T.Depl);
+                } else {
+                    return try self.deserializeUnion(ActualType, root.UnionDeployment{});
+                }
+            },
+            .int => {
+                return try self.deserializeInt(T);
+            },
+            .float => {
+                return try self.deserializeFloat(T);
+            },
+            .array => {
+                return try self.deserializeArray(info.array.child, T.Depl);
+            },
+            .pointer => |p| {
+                if (p.size == .slice) {
+                    if (p.child == u8) {
+                        if (deployed) {
+                            if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
+                                return try self.deserializeDynamicString(T.Depl);
+                            } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
+                                return try self.deserializeFixedString(T.Depl.length);
+                            } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                return try self.deserializeSlice(p.child, T.Depl);
+                            } else {
+                                @compileError("Wrong deployment for u8 slice");
+                            }
+                        } else {
+                            return try self.deserializeDynamicString(T.Depl);
+                        }
+                        return;
+                    }
+                    if (deployed) {
+                        if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                            return try self.deserializeSlice(p.child, T.Depl);
+                        } else {
+                            @compileError("Wrong deployment for slice");
+                        }
+                    } else {
+                        return try self.deserializeSlice(p.child, root.ArrayDeployment{});
+                    }
+                } else {
+                    comptime {
+                        var buf: [64]u8 = undefined;
+                        const msg = try std.fmt.bufPrint(&buf, "Only pointers to slices are valid, got: {d}!", .{p.size});
+                        @compileError(msg);
+                    }
+                }
+            },
+            else => @compileError("Unsupported type"),
+        }
+    }
+};
+
+fn WidthToType(comptime widthType: root.Width) type {
+    return switch (widthType) {
+        .U8 => u8,
+        .U16 => u16,
+        .U32 => u32,
+    };
+}
+
+fn StripDeployment(comptime T: type) type {
+    if (root.is_deployed(T)) {
+        return T.Inner;
+    } else {
+        return T;
+    }
+}
