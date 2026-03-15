@@ -12,7 +12,7 @@ const MyStruct = struct {
     b: u16,
     c: u32,
 };
-const MyUnion = union {
+const MyUnion = union(enum) {
     a: u8,
     b: u16,
     c: u32,
@@ -22,22 +22,32 @@ const MyUnion = union {
 The entry point for serialization is the generic `serialize` function, that uses compile time reflection to analyse the type passed to the function and to dispatch to the specialised serializer functions.
 
 ```c
-const givenStruct = Test{
-    .a = 0x12,
-    .b = 0x3456,
-    .c = 0x789ABCDE,
-};
-const expected = &[_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE };
+    const Test = struct {
+        a: u8,
+        b: u16,
+        c: u32,
+    };
+    const given = Test{
+        .a = 0x12,
+        .b = 0x3456,
+        .c = 0x789ABCDE,
+    };
 
-var buffer = [_]u8{0} ** 1024;
-var fba = std.heap.FixedBufferAllocator.init(&buffer);
-var allocator = fba.allocator();
-const slice = try allocator.alloc(u8, 100);
-defer allocator.free(slice);
+    var buffer = [_]u8{0} ** 1024;
 
-var serializer = zsip.Serializer.init(slice);
-try zsip.serialize(zsip.Deployment{ .struct_depl = zsip.StructDeployment{} }, givenStruct, &serializer);
-try std.testing.expectEqualSlices(u8, serializer.get(), expected);
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    var allocator = fba.allocator();
+
+    const slice = try allocator.alloc(u8, 100);
+    defer allocator.free(slice);
+    const size = try zsip.serialize.serialize(given, slice[0..]);
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), expected[0..]);
+    defer deser.deinit();
+
+    const deserialized = try deser.deserialize(Test);
 ```
 
 ## Deployment Parameters
