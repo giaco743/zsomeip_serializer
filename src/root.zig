@@ -11,6 +11,7 @@ pub const SerializeError = error{
     BomMissing,
     NullMissing,
     InvalidLength,
+    InvalidUnionTag,
 };
 
 pub const Width = enum {

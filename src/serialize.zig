@@ -246,15 +246,20 @@ const CompoundTypeSerializer = struct {
     }
 
     pub fn serializeUnion(comptime T: type, comptime depl: root.UnionDeployment, serializer: *Serializer, value: T) !void {
+        comptime {
+            if (@typeInfo(T) != .@"union")
+                @compileError("serializeUnion expects a union type");
+        }
         switch (value) {
             inline else => |payload, tag| {
                 const length_pos = serializer.pos;
                 try serializer.serializeTag(depl.lengthWidth, 0);
-                try serializer.serializeTag(depl.typeWidth, @intFromEnum(tag));
+                const tag_int = @intFromEnum(tag);
+                try serializer.serializeTag(depl.typeWidth, tag_int + 1);
                 const start = serializer.pos;
                 try CompoundTypeSerializer.serialize(@TypeOf(payload), payload, serializer);
                 const end = serializer.pos;
-                serializer.patchTag(depl.lengthWidth, length_pos, end - start);
+                try serializer.patchTag(depl.lengthWidth, length_pos, end - start);
             },
         }
     }

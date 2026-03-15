@@ -123,7 +123,14 @@ pub const Deserializer = struct {
             @compileError("T must be a float type");
         _ = try self.deserializeTag(depl.lengthWidth);
         const discriminant = try self.deserializeTag(depl.typeWidth);
-        return try self.deserialize(info.@"union".fields[discriminant - 1]);
+        const fields = info.@"union".fields;
+        inline for (fields, 0..) |field, i| {
+            if (discriminant == i + 1) {
+                const payload = try self.deserialize(field.type);
+                return @unionInit(T, field.name, payload);
+            }
+        }
+        return error.InvalidUnionTag;
     }
     pub fn deserialize(self: *Deserializer, comptime T: type) !StripDeployment(T) {
         const deployed = comptime root.is_deployed(T);

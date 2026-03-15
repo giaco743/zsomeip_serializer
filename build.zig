@@ -27,6 +27,7 @@ pub fn build(b: *std.Build) void {
         "tests/slices.zig",
         "tests/strings.zig",
         "tests/structs.zig",
+        "tests/unions.zig",
     };
     for (test_files) |file| {
         const test_mod = b.createModule(.{
