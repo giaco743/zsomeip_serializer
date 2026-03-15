@@ -139,34 +139,63 @@ const CompoundTypeSerializer = struct {
                 try CompoundTypeSerializer.serializeArray(a.child, a.len, value);
             },
             .pointer => |p| {
-                if (p.size == .slice) {
-                    if (p.child == u8) {
-                        if (deployed) {
-                            if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
-                                try serializer.serializeDynamicString(T.Depl, value.value);
-                            } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
-                                try serializer.serializeFixedString(T.Depl.length, value.value);
-                            } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
-                                try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, value.value);
+                switch (p.size) {
+                    .slice => {
+                        if (p.child == u8) {
+                            if (deployed) {
+                                if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
+                                    try serializer.serializeDynamicString(T.Depl, value.value);
+                                } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
+                                    try serializer.serializeFixedString(T.Depl.length, value.value);
+                                } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                    try CompoundTypeSerializer.serializeSlice(serializer, u8, T.Depl, value.value);
+                                } else {
+                                    @compileError("Wrong deployment");
+                                }
                             } else {
-                                @compileError("Wrong deployment");
+                                try serializer.serializeDynamicString(.{}, value);
                             }
-                        } else {
-                            try serializer.serializeDynamicString(root.DynamicStringDeployment{}, value.value);
+                            return;
                         }
-                        return;
-                    }
-                    if (deployed) {
-                        try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, value.value);
-                    } else {
-                        try CompoundTypeSerializer.serializeSlice(serializer, p.child, .{}, value);
-                    }
-                } else {
-                    comptime {
-                        var buf: [64]u8 = undefined;
-                        const msg = try std.fmt.bufPrint(&buf, "Only pointers to slices are valid, got: {d}!", .{p.size});
-                        @compileError(msg);
-                    }
+                        if (deployed) {
+                            try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, value.value);
+                        } else {
+                            try CompoundTypeSerializer.serializeSlice(serializer, p.child, .{}, value);
+                        }
+                    },
+                    .one => {
+                        switch (@typeInfo(p.child)) {
+                            .array => |a| {
+                                if (a.child == u8) {
+                                    if (deployed) {
+                                        if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
+                                            try serializer.serializeDynamicString(T.Depl, value.value[0..]);
+                                        } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
+                                            try serializer.serializeFixedString(T.Depl.length, value.value[0..]);
+                                        } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                            try CompoundTypeSerializer.serializeSlice(serializer, u8, T.Depl, value.value[0..]);
+                                        } else {
+                                            @compileError("Wrong deployment");
+                                        }
+                                    } else {
+                                        try serializer.serializeDynamicString(.{}, value[0..]);
+                                    }
+                                    return;
+                                }
+                                if (deployed) {
+                                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, T.Depl, value.value[0..]);
+                                } else {
+                                    try CompoundTypeSerializer.serializeSlice(serializer, p.child, .{}, value[0..]);
+                                }
+                            },
+                            else => {
+                                @compileError("Unsupported one elem pointer");
+                            },
+                        }
+                    },
+                    else => {
+                        @compileError("Unsupported pointer");
+                    },
                 }
             },
             else => @compileError("Unsupported type"),

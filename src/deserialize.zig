@@ -4,11 +4,11 @@ const root = @import("root.zig");
 pub const Deserializer = struct {
     arena: std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
-    input: []u8,
+    input: []const u8,
     pos: usize = 0, // byte position
     bit_offset: u8 = 0, // bit offset within current byte (0-7)
 
-    pub fn init(allocator: std.mem.Allocator, input: []u8) Deserializer {
+    pub fn init(allocator: std.mem.Allocator, input: []const u8) Deserializer {
         const arena = std.heap.ArenaAllocator.init(allocator);
         return Deserializer{
             .arena = arena,
@@ -32,7 +32,7 @@ pub const Deserializer = struct {
                     if (self.pos + size > self.input.len)
                         return root.SerializeError.OutOfBounds;
 
-                    const ptr: *[size]u8 = @ptrCast(self.input[self.pos..].ptr);
+                    const ptr: *const [size]u8 = @ptrCast(self.input[self.pos..].ptr);
                     const result = std.mem.readInt(T, ptr, .big);
                     self.pos += size;
                     return result;
@@ -80,9 +80,9 @@ pub const Deserializer = struct {
         if (self.input[self.pos..].len < length)
             return root.SerializeError.BufferOverflow;
         const BOM = [3]u8{ 0xEF, 0xBB, 0xBF };
-        if (std.mem.eql(u8, self.input[self.pos .. self.pos + 3], BOM))
+        if (!std.mem.eql(u8, self.input[self.pos .. self.pos + 3], &BOM))
             return root.SerializeError.BomMissing;
-        if (std.mem.eqal(u8, self.input[self.input.pos + length], 0))
+        if (self.input[self.pos + length - 1] != 0)
             return root.SerializeError.NullMissing;
         const result = self.input[self.pos + 3 .. self.pos + (length - 1)];
         self.pos += length;
@@ -102,17 +102,17 @@ pub const Deserializer = struct {
         }
         return buffer;
     }
-    pub fn deserializeSlice(self: *Deserializer, comptime T: type, comptime depl: root.ArrayDeployment) (root.SerializeError || error{OutOfMemory})![]T {
+    pub fn deserializeSlice(self: *Deserializer, comptime Child: type, comptime depl: root.ArrayDeployment) (root.SerializeError || error{OutOfMemory})![]Child {
         const size = try self.deserializeTag(depl.lengthWidth);
         // Check that byteLength is a multiple of element size
-        if (size % @sizeOf(T) != 0) {
+        if (size % @sizeOf(Child) != 0) {
             return root.SerializeError.InvalidLength; // your custom error
         }
-        const length = size / @sizeOf(T);
-        var slice = try self.arena.allocator().alloc(T, length);
+        const length = size / @sizeOf(Child);
+        var slice = try self.arena.allocator().alloc(Child, length);
 
         for (slice[0..]) |*elem| {
-            elem.* = try self.deserialize(T);
+            elem.* = try self.deserialize(Child);
         }
 
         return slice;
@@ -128,19 +128,27 @@ pub const Deserializer = struct {
     pub fn deserialize(self: *Deserializer, comptime T: type) !StripDeployment(T) {
         const deployed = comptime root.is_deployed(T);
 
-        const ActualType = comptime if (deployed) T.Inner else T;
+        const StrippedType = StripDeployment(T);
+        const InnerType = comptime if (deployed) T.Inner else T;
 
-        const info = @typeInfo(ActualType);
+        const info = @typeInfo(InnerType);
         switch (info) {
             .@"struct" => |s| {
-                var result: ActualType = undefined;
-                inline for (s.fields) |field| {
-                    if (@hasField(@TypeOf(T.Depl), field.name)) {
-                        const DeployedField = root.Deployed(field.type, @field(T.Depl, field.name));
-                        const field_value = try self.deserialize(DeployedField);
-                        @field(result, field.name) = field_value;
-                    } else {
-                        @field(result, field.name) = try self.deserialize(T);
+                var result: StrippedType = undefined;
+                if (deployed) {
+                    inline for (s.fields) |field| {
+                        if (@hasField(@TypeOf(T.Depl), field.name)) {
+                            std.debug.print("Deserializing {any}", .{field.name});
+                            const DeployedField = root.Deployed(field.type, @field(T.Depl, field.name));
+                            const field_value = try self.deserialize(DeployedField);
+                            @field(result, field.name) = field_value;
+                        } else {
+                            @field(result, field.name) = try self.deserialize(field.type);
+                        }
+                    }
+                } else {
+                    inline for (s.fields) |field| {
+                        @field(result, field.name) = try self.deserialize(field.type);
                     }
                 }
                 return result;
@@ -150,9 +158,9 @@ pub const Deserializer = struct {
                     if (@TypeOf(T.Depl) != root.UnionDeployment) {
                         @compileError("Wrong deployment for union");
                     }
-                    return try self.deserializeUnion(ActualType, T.Depl);
+                    return try self.deserializeUnion(InnerType, T.Depl);
                 } else {
-                    return try self.deserializeUnion(ActualType, root.UnionDeployment{});
+                    return try self.deserializeUnion(InnerType, root.UnionDeployment{});
                 }
             },
             .int => {
@@ -165,38 +173,69 @@ pub const Deserializer = struct {
                 return try self.deserializeArray(info.array.child, T.Depl);
             },
             .pointer => |p| {
-                if (p.size == .slice) {
-                    if (p.child == u8) {
+                switch (p.size) {
+                    .slice => {
+                        if (p.child == u8) {
+                            if (deployed) {
+                                if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
+                                    return try self.deserializeDynamicString(T.Depl);
+                                } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
+                                    return try self.deserializeFixedString(T.Depl.length);
+                                } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                    return try self.deserializeSlice(p.child, T.Depl);
+                                } else {
+                                    @compileError("Wrong deployment for u8 slice");
+                                }
+                            } else {
+                                return try self.deserializeDynamicString(root.DynamicStringDeployment{});
+                            }
+                        }
                         if (deployed) {
-                            if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
-                                return try self.deserializeDynamicString(T.Depl);
-                            } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
-                                return try self.deserializeFixedString(T.Depl.length);
-                            } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                            if (@TypeOf(T.Depl) == root.ArrayDeployment) {
                                 return try self.deserializeSlice(p.child, T.Depl);
                             } else {
-                                @compileError("Wrong deployment for u8 slice");
+                                @compileError("Wrong deployment for slice");
                             }
                         } else {
-                            return try self.deserializeDynamicString(T.Depl);
+                            return try self.deserializeSlice(p.child, root.ArrayDeployment{});
                         }
-                        return;
-                    }
-                    if (deployed) {
-                        if (@TypeOf(T.Depl) == root.ArrayDeployment) {
-                            return try self.deserializeSlice(p.child, T.Depl);
-                        } else {
-                            @compileError("Wrong deployment for slice");
+                    },
+                    .one => {
+                        switch (@typeInfo(p.child)) {
+                            .array => |a| {
+                                if (a.child == u8) {
+                                    if (deployed) {
+                                        if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
+                                            return try self.deserializeDynamicString(T.Depl);
+                                        } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
+                                            return try self.deserializeFixedString(T.Depl.length);
+                                        } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                            return try self.deserializeSlice(u8, T.Depl);
+                                        } else {
+                                            @compileError("Wrong deployment for u8 slice");
+                                        }
+                                    } else {
+                                        return try self.deserializeDynamicString(root.DynamicStringDeployment{});
+                                    }
+                                }
+                                if (deployed) {
+                                    if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                        return try self.deserializeSlice(a.child, T.Depl);
+                                    } else {
+                                        @compileError("Wrong deployment for slice");
+                                    }
+                                } else {
+                                    return try self.deserializeSlice(p.child, root.ArrayDeployment{});
+                                }
+                            },
+                            else => {
+                                @compileError("Unsupported single elem pointer type");
+                            },
                         }
-                    } else {
-                        return try self.deserializeSlice(p.child, root.ArrayDeployment{});
-                    }
-                } else {
-                    comptime {
-                        var buf: [64]u8 = undefined;
-                        const msg = try std.fmt.bufPrint(&buf, "Only pointers to slices are valid, got: {d}!", .{p.size});
-                        @compileError(msg);
-                    }
+                    },
+                    else => {
+                        @compileError("Unsupported pointer type");
+                    },
                 }
             },
             else => @compileError("Unsupported type"),
@@ -212,10 +251,42 @@ fn WidthToType(comptime widthType: root.Width) type {
     };
 }
 
-fn StripDeployment(comptime T: type) type {
-    if (root.is_deployed(T)) {
-        return T.Inner;
-    } else {
-        return T;
-    }
+// fn StripDeployment(comptime T: type) type {
+//     if (root.is_deployed(T)) {
+//         return T.Inner;
+//     } else {
+//         return T;
+//     }
+// }
+
+pub fn StripDeployment(comptime T: type) type {
+    if (root.is_deployed(T))
+        return StripDeployment(T.Inner);
+
+    return switch (@typeInfo(T)) {
+        .@"struct" => |s| {
+            var fields: [s.fields.len]std.builtin.Type.StructField = undefined;
+
+            inline for (s.fields, 0..) |f, i| {
+                fields[i] = .{
+                    .name = f.name,
+                    .type = StripDeployment(f.type),
+                    .default_value_ptr = null,
+                    .is_comptime = false,
+                    .alignment = @alignOf(StripDeployment(f.type)),
+                };
+            }
+
+            return @Type(.{
+                .@"struct" = .{
+                    .layout = s.layout,
+                    .fields = &fields,
+                    .decls = &.{},
+                    .is_tuple = false,
+                },
+            });
+        },
+
+        else => return T,
+    };
 }

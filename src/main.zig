@@ -1,5 +1,5 @@
 const std = @import("std");
-const zsomeip_serializer = @import("zsomeip_serializer");
+const root = @import("root.zig");
 
 const Message = struct {
     a: u3,
@@ -69,13 +69,13 @@ pub fn main() !void {
         array_a: []u16,
         array_b: []u16,
     };
-    const DeployedArrayMessage = zsomeip_serializer.Deployed(ArrayMessage, .{ .array_a = zsomeip_serializer.ArrayDeployment{ .lengthWidth = zsomeip_serializer.Width.U16 }, .array_b = zsomeip_serializer.ArrayDeployment{ .lengthWidth = zsomeip_serializer.Width.U16 } });
+    const DeployedArrayMessage = root.Deployed(ArrayMessage, .{ .array_a = root.ArrayDeployment{ .lengthWidth = root.Width.U16 }, .array_b = root.ArrayDeployment{ .lengthWidth = root.Width.U16 } });
 
     std.debug.print("Serializing width array\n", .{});
     var buffer: [22]u8 = undefined;
     @memset(&buffer, 0); // Initialize buffer to 0
     var bw_array = [_]u16{ 1, 2, 3, 4 };
-    _ = try zsomeip_serializer.serialize.serialize(DeployedArrayMessage{ .value = ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] } }, buffer[0..]);
+    _ = try root.serialize.serialize(DeployedArrayMessage{ .value = ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] } }, buffer[0..]);
     std.debug.print("First byte: {b:0>8}\n", .{buffer[0]});
     std.debug.print("Second byte: {b:0>8}\n", .{buffer[1]});
     std.debug.print("Third byte: {b:0>8}\n", .{buffer[2]});
@@ -101,9 +101,10 @@ pub fn main() !void {
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    var deser = zsomeip_serializer.deserialize.Deserializer.init(gpa.allocator(), &buffer);
+    const input = buffer;
+    var deser = root.deserialize.Deserializer.init(gpa.allocator(), input[0..]);
     defer deser.deinit();
 
     const message = try deser.deserialize(DeployedArrayMessage);
-    std.debug.print("Deserialized {}", .{message});
+    std.debug.print("Deserialized {any}", .{message});
 }

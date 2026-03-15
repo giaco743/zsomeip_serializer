@@ -1,5 +1,5 @@
 const std = @import("std");
-const zsip = @import("zsomeip_serializer");
+const zsip = @import("libzsip");
 
 test "default deployment" {
     const expected = &[_]u8{ 0x00, 0x00, 0x00, 0x09, 0xEF, 0xBB, 0xBF, 0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x00 };
