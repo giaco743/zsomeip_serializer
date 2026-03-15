@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) void {
         "tests/strings.zig",
         "tests/structs.zig",
         "tests/unions.zig",
+        "tests/serialize_bench.zig",
     };
     for (test_files) |file| {
         const test_mod = b.createModule(.{
