@@ -10,10 +10,11 @@ test "bench" {
         c: u32,
     };
     const DeployedTest = zsip.Deployed(Test, struct {}{});
-    var buffer = [_]u8{0} ** 128;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
+
+    var buffer: [1024]u8 = undefined; // your buffer
 
     for (0..1000000) |i| {
         const given = Test{
@@ -23,10 +24,9 @@ test "bench" {
         };
         const givenStruct = DeployedTest.wrap(given);
 
-        const size = try zsip.serialize.serialize(givenStruct, buffer[0..]);
+        const size = try zsip.serialize.serialize(givenStruct, &buffer);
 
         var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), buffer[0..size]);
-        defer deser.deinit();
         _ = try deser.deserialize(DeployedTest);
     }
     const end = std.time.milliTimestamp();

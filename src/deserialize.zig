@@ -2,25 +2,16 @@ const std = @import("std");
 const root = @import("root.zig");
 
 pub const Deserializer = struct {
-    arena: std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
     input: []const u8,
     pos: usize = 0, // byte position
-    bit_offset: u8 = 0, // bit offset within current byte (0-7)
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) Deserializer {
-        const arena = std.heap.ArenaAllocator.init(allocator);
         return Deserializer{
-            .arena = arena,
             .allocator = allocator,
             .input = input,
             .pos = 0,
-            .bit_offset = 0,
         };
-    }
-
-    pub fn deinit(self: *Deserializer) void {
-        self.arena.deinit();
     }
 
     pub fn deserializeInt(self: *Deserializer, comptime T: type) !T {
@@ -55,7 +46,7 @@ pub const Deserializer = struct {
             return root.SerializeError.OutOfBounds;
 
         const ptr: *[size]u8 = @ptrCast(self.input[self.pos..].ptr);
-        const resultAsInt = std.mem.re(IntT, ptr, .big);
+        const resultAsInt = std.mem.readInt(IntT, ptr, .big);
         self.pos += size;
         return @bitCast(resultAsInt);
     }
@@ -96,7 +87,7 @@ pub const Deserializer = struct {
         return try self.deserializeString(length);
     }
     pub fn deserializeArray(self: *Deserializer, comptime T: type, comptime Size: usize) ![Size]T {
-        var buffer: [Size]T = undefined;
+        var buffer = try self.arena.allocator().alloc(T, Size);
         for (0..Size) |i| {
             buffer[i] = try self.deserialize();
         }
@@ -109,7 +100,7 @@ pub const Deserializer = struct {
             return root.SerializeError.InvalidLength; // your custom error
         }
         const length = size / @sizeOf(Child);
-        var slice = try self.arena.allocator().alloc(Child, length);
+        var slice = try self.allocator.alloc(Child, length);
 
         for (slice[0..]) |*elem| {
             elem.* = try self.deserialize(Child);
@@ -257,14 +248,6 @@ fn WidthToType(comptime widthType: root.Width) type {
         .U32 => u32,
     };
 }
-
-// fn StripDeployment(comptime T: type) type {
-//     if (root.is_deployed(T)) {
-//         return T.Inner;
-//     } else {
-//         return T;
-//     }
-// }
 
 pub fn StripDeployment(comptime T: type) type {
     if (root.is_deployed(T))

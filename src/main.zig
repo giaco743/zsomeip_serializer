@@ -72,8 +72,8 @@ pub fn main() !void {
     const DeployedArrayMessage = root.Deployed(ArrayMessage, .{ .array_a = root.ArrayDeployment{ .lengthWidth = root.Width.U16 }, .array_b = root.ArrayDeployment{ .lengthWidth = root.Width.U16 } });
 
     std.debug.print("Serializing width array\n", .{});
-    var buffer: [22]u8 = undefined;
-    @memset(&buffer, 0); // Initialize buffer to 0
+    var buffer: [1024]u8 = undefined; // your buffer
+
     var bw_array = [_]u16{ 1, 2, 3, 4 };
     _ = try root.serialize.serialize(DeployedArrayMessage{ .value = ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] } }, buffer[0..]);
     std.debug.print("First byte: {b:0>8}\n", .{buffer[0]});
@@ -103,8 +103,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const input = buffer;
     var deser = root.deserialize.Deserializer.init(gpa.allocator(), input[0..]);
-    defer deser.deinit();
 
     const message = try deser.deserialize(DeployedArrayMessage);
     std.debug.print("Deserialized {any}", .{message});
+    gpa.allocator().free(message.array_a);
+    gpa.allocator().free(message.array_b);
 }

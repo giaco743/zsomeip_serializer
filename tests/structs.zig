@@ -21,21 +21,15 @@ test "default deployment" {
     };
     const expected = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE };
 
-    var buffer = [_]u8{0} ** 1024;
+    var buffer: [1024]u8 = undefined; // your buffer
 
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var allocator = fba.allocator();
+    const size = try zsip.serialize.serialize(givenStruct, buffer[0..]);
 
-    const slice = try allocator.alloc(u8, 100);
-    defer allocator.free(slice);
-    const size = try zsip.serialize.serialize(givenStruct, slice[0..]);
-
-    try std.testing.expectEqualSlices(u8, slice[0..size], &expected);
+    try std.testing.expectEqualSlices(u8, buffer[0..size], &expected);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), expected[0..]);
-    defer deser.deinit();
 
     const deserialized = try deser.deserialize(DeployedTest);
     try std.testing.expectEqual(expectedOut, deserialized);
@@ -58,22 +52,15 @@ test "no deployment" {
         .c = 0x789ABCDE,
     };
     const expected = &[_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE };
+    var buffer: [1024]u8 = undefined; // your buffer
 
-    var buffer = [_]u8{0} ** 1024;
+    const size = try zsip.serialize.serialize(givenStruct, &buffer);
 
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var allocator = fba.allocator();
-
-    const slice = try allocator.alloc(u8, 100);
-    defer allocator.free(slice);
-    const size = try zsip.serialize.serialize(givenStruct, slice[0..]);
-
-    try std.testing.expectEqualSlices(u8, slice[0..size], expected);
+    try std.testing.expectEqualSlices(u8, buffer[0..size], expected);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), expected[0..]);
-    defer deser.deinit();
 
     const deserialized = try deser.deserialize(Test);
     try std.testing.expectEqual(expectedOut, deserialized);
@@ -89,13 +76,7 @@ test "nested struct" {
         y: u32,
     };
 
-    var buffer = [_]u8{0} ** 1024;
-
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var allocator = fba.allocator();
-
-    const slice = try allocator.alloc(u8, 100);
-    defer allocator.free(slice);
+    var buffer: [1024]u8 = undefined; // your buffer
 
     const outer = OuterStruct{
         .inner = InnerStruct{ .x = 0x1234 },
@@ -106,13 +87,12 @@ test "nested struct" {
         .y = 0x56789ABC,
     };
     const expected = &[_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC };
-    const size = try zsip.serialize.serialize(outer, slice[0..]);
-    try std.testing.expectEqualSlices(u8, slice[0..size], expected);
+    const size = try zsip.serialize.serialize(outer, &buffer);
+    try std.testing.expectEqualSlices(u8, buffer[0..size], expected);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), expected[0..]);
-    defer deser.deinit();
 
     const deserialized = try deser.deserialize(OuterStruct);
     try std.testing.expectEqual(expectedOut, deserialized);
@@ -121,24 +101,17 @@ test "nested struct" {
 test "empty struct" {
     const EmptyStruct = struct {};
 
-    var buffer = [_]u8{0} ** 1024;
-
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var allocator = fba.allocator();
-
-    const slice = try allocator.alloc(u8, 100);
-    defer allocator.free(slice);
+    var buffer: [1024]u8 = undefined; // your buffer
 
     const empty = EmptyStruct{};
     const expectedOut = zsip.deserialize.StripDeployment(EmptyStruct){};
     const expected = &[_]u8{};
-    const size = try zsip.serialize.serialize(empty, slice[0..]);
-    try std.testing.expectEqualSlices(u8, slice[0..size], expected);
+    const size = try zsip.serialize.serialize(empty, &buffer);
+    try std.testing.expectEqualSlices(u8, buffer[0..size], expected);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), expected[0..]);
-    defer deser.deinit();
 
     const deserialized = try deser.deserialize(EmptyStruct);
     try std.testing.expectEqual(expectedOut, deserialized);
@@ -153,13 +126,7 @@ test "complex struct" {
         s: []const u8,
     };
 
-    var buffer = [_]u8{0} ** 1024;
-
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var allocator = fba.allocator();
-
-    const slice = try allocator.alloc(u8, 100);
-    defer allocator.free(slice);
+    var buffer: [1024]u8 = undefined; // your buffer
 
     var b = [_]u16{ 0x56, 0x78, 0x9A };
     const complex = ComplexStruct{ .a = 0x1234, .b = U16Array{ .value = b[0..] }, .inner = InnerStruct{ .x = 0xBCDE }, .s = "test" };
@@ -173,17 +140,18 @@ test "complex struct" {
         0xEF, 0xBB, 0xBF, // s: BOM
         0x74, 0x65, 0x73, 0x74, 0x00, // s: "test\0"
     };
-    const size = try zsip.serialize.serialize(complex, slice[0..]);
-    try std.testing.expectEqualSlices(u8, expected, slice[0..size]);
+    const size = try zsip.serialize.serialize(complex, &buffer);
+    try std.testing.expectEqualSlices(u8, expected, buffer[0..size]);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), expected[0..]);
-    defer deser.deinit();
 
     const deserialized = try deser.deserialize(ComplexStruct);
     try std.testing.expectEqual(expectedOut.a, deserialized.a);
     try std.testing.expectEqualStrings(expectedOut.s, deserialized.s);
     try std.testing.expectEqual(expectedOut.inner, deserialized.inner);
     try std.testing.expectEqualSlices(u16, expectedOut.b, deserialized.b);
+
+    gpa.allocator().free(deserialized.b);
 }
