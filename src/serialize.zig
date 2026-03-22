@@ -59,12 +59,12 @@ const Serializer = struct {
                             } else {
                                 try self.serializeDynamicString(.{}, value);
                             }
-                            return;
-                        }
-                        if (deployed) {
-                            try self.serializeSlice(p.child, T.Depl, value.value);
                         } else {
-                            try self.serializeSlice(p.child, .{}, value);
+                            if (deployed) {
+                                try self.serializeSlice(p.child, T.Depl, value.value);
+                            } else {
+                                try self.serializeSlice(p.child, .{}, value);
+                            }
                         }
                     },
                     .one => {
@@ -73,23 +73,23 @@ const Serializer = struct {
                                 if (a.child == u8) {
                                     if (deployed) {
                                         if (@TypeOf(T.Depl) == root.DynamicStringDeployment) {
-                                            try self.serializeDynamicString(T.Depl, value.value[0..]);
+                                            try self.serializeDynamicString(T.Depl, value.value.*[0..]);
                                         } else if (@TypeOf(T.Depl) == root.FixedStringDeployment) {
-                                            try self.serializeString(value.value[0..]);
+                                            try self.serializeString(value.value.*[0..]);
                                         } else if (@TypeOf(T.Depl) == root.ArrayDeployment) {
-                                            try self.serializeSlice(u8, T.Depl, value.value[0..]);
+                                            try self.serializeSlice(u8, T.Depl, value.value.*[0..]);
                                         } else {
                                             @compileError("Wrong deployment");
                                         }
                                     } else {
-                                        try self.serializeDynamicString(.{}, value[0..]);
+                                        try self.serializeDynamicString(.{}, value.*[0..]);
                                     }
-                                    return;
-                                }
-                                if (deployed) {
-                                    try self.serializeSlice(p.child, T.Depl, value.value[0..]);
                                 } else {
-                                    try self.serializeSlice(p.child, .{}, value[0..]);
+                                    if (deployed) {
+                                        try self.serializeSlice(a.child, T.Depl, value.value.*[0..]);
+                                    } else {
+                                        try self.serializeSlice(a.child, .{}, value.*[0..]);
+                                    }
                                 }
                             },
                             else => {

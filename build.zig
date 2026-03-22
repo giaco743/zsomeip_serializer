@@ -24,6 +24,7 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run integration tests");
     const test_files = [_][]const u8{
+        "tests/arrays.zig",
         "tests/slices.zig",
         "tests/strings.zig",
         "tests/structs.zig",

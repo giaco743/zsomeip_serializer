@@ -89,7 +89,7 @@ pub const Deserializer = struct {
     pub fn deserializeArray(self: *Deserializer, comptime T: type, comptime Size: usize) ![Size]T {
         var result: [Size]T = undefined;
         for (0..Size) |i| {
-            result[i] = try self.deserialize();
+            result[i] = try self.deserialize(T);
         }
         return result;
     }
@@ -169,8 +169,8 @@ pub const Deserializer = struct {
             .float => {
                 return try self.deserializeFloat(T);
             },
-            .array => {
-                return try self.deserializeArray(info.array.child, T.Depl);
+            .array => |a| {
+                return try self.deserializeArray(a.child, a.len);
             },
             .pointer => |p| {
                 switch (p.size) {
@@ -189,15 +189,16 @@ pub const Deserializer = struct {
                             } else {
                                 return try self.deserializeDynamicString(root.DynamicStringDeployment{});
                             }
-                        }
-                        if (deployed) {
-                            if (@TypeOf(T.Depl) == root.ArrayDeployment) {
-                                return try self.deserializeSlice(p.child, T.Depl);
-                            } else {
-                                @compileError("Wrong deployment for slice");
-                            }
                         } else {
-                            return try self.deserializeSlice(p.child, root.ArrayDeployment{});
+                            if (deployed) {
+                                if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                    return try self.deserializeSlice(p.child, T.Depl);
+                                } else {
+                                    @compileError("Wrong deployment for slice");
+                                }
+                            } else {
+                                return try self.deserializeSlice(p.child, root.ArrayDeployment{});
+                            }
                         }
                     },
                     .one => {
@@ -217,15 +218,16 @@ pub const Deserializer = struct {
                                     } else {
                                         return try self.deserializeDynamicString(root.DynamicStringDeployment{});
                                     }
-                                }
-                                if (deployed) {
-                                    if (@TypeOf(T.Depl) == root.ArrayDeployment) {
-                                        return try self.deserializeSlice(a.child, T.Depl);
-                                    } else {
-                                        @compileError("Wrong deployment for slice");
-                                    }
                                 } else {
-                                    return try self.deserializeSlice(p.child, root.ArrayDeployment{});
+                                    if (deployed) {
+                                        if (@TypeOf(T.Depl) == root.ArrayDeployment) {
+                                            return try self.deserializeSlice(a.child, T.Depl);
+                                        } else {
+                                            @compileError("Wrong deployment for slice");
+                                        }
+                                    } else {
+                                        return try self.deserializeSlice(p.child, root.ArrayDeployment{});
+                                    }
                                 }
                             },
                             else => {
