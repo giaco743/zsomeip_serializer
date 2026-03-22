@@ -9,7 +9,7 @@ test "default deployment" {
     const text = "Hello";
     const text_slice: []const u8 = text[0..];
     const DeployedText = zsip.Deployed(@TypeOf(text_slice), zsip.DynamicStringDeployment{});
-    const size = try zsip.serialize.serialize(DeployedText.wrap(text_slice), &buffer);
+    const size = try zsip.serialize(DeployedText.wrap(text_slice), &buffer);
 
     try std.testing.expectEqualSlices(u8, expected, buffer[0..size]);
 }
@@ -22,7 +22,7 @@ test "fixed deployment" {
     const text = "Hello";
     const text_slice: []const u8 = text[0..];
     const DeployedText = zsip.Deployed(@TypeOf(text_slice), zsip.FixedStringDeployment{ .length = 5 });
-    const size = try zsip.serialize.serialize(DeployedText.wrap(text_slice), &buffer);
+    const size = try zsip.serialize(DeployedText.wrap(text_slice), &buffer);
 
     try std.testing.expectEqualSlices(u8, expected, buffer[0..size]);
 }

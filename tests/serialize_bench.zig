@@ -24,9 +24,9 @@ test "bench" {
         };
         const givenStruct = DeployedTest.wrap(given);
 
-        const size = try zsip.serialize.serialize(givenStruct, &buffer);
+        const size = try zsip.serialize(givenStruct, &buffer);
 
-        var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), buffer[0..size]);
+        var deser = zsip.Deserializer.init(gpa.allocator(), buffer[0..size]);
         _ = try deser.deserialize(DeployedTest);
     }
     const end = std.time.milliTimestamp();

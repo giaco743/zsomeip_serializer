@@ -1,6 +1,7 @@
 const std = @import("std");
-pub const serialize = @import("serialize.zig");
-pub const deserialize = @import("deserialize.zig");
+pub const serialize = @import("serialize.zig").serialize;
+pub const Deserializer = @import("deserialize.zig").Deserializer;
+pub const StripDeployment = @import("deserialize.zig").StripDeployment;
 
 pub const SerializeError = error{
     InvalidType,

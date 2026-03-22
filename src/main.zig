@@ -75,7 +75,7 @@ pub fn main() !void {
     var buffer: [1024]u8 = undefined; // your buffer
 
     var bw_array = [_]u16{ 1, 2, 3, 4 };
-    _ = try root.serialize.serialize(DeployedArrayMessage{ .value = ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] } }, buffer[0..]);
+    _ = try root.serialize(DeployedArrayMessage{ .value = ArrayMessage{ .array_a = bw_array[0..], .array_b = bw_array[0..] } }, buffer[0..]);
     std.debug.print("First byte: {b:0>8}\n", .{buffer[0]});
     std.debug.print("Second byte: {b:0>8}\n", .{buffer[1]});
     std.debug.print("Third byte: {b:0>8}\n", .{buffer[2]});
@@ -102,7 +102,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const input = buffer;
-    var deser = root.deserialize.Deserializer.init(gpa.allocator(), input[0..]);
+    var deser = root.Deserializer.init(gpa.allocator(), input[0..]);
 
     const message = try deser.deserialize(DeployedArrayMessage);
     std.debug.print("Deserialized {any}", .{message});
