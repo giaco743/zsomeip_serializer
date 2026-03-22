@@ -87,11 +87,11 @@ pub const Deserializer = struct {
         return try self.deserializeString(length);
     }
     pub fn deserializeArray(self: *Deserializer, comptime T: type, comptime Size: usize) ![Size]T {
-        var buffer = try self.arena.allocator().alloc(T, Size);
+        var result: [Size]T = undefined;
         for (0..Size) |i| {
-            buffer[i] = try self.deserialize();
+            result[i] = try self.deserialize();
         }
-        return buffer;
+        return result;
     }
     pub fn deserializeSlice(self: *Deserializer, comptime Child: type, comptime depl: root.ArrayDeployment) (root.SerializeError || error{OutOfMemory})![]Child {
         const size = try self.deserializeTag(depl.lengthWidth);
