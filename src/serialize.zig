@@ -169,7 +169,6 @@ const Serializer = struct {
     }
 
     pub fn serializeSlice(self: *Serializer, comptime T: type, comptime depl: root.ArrayDeployment, value: []const T) !void {
-        // Temporary buffer to compute the slice size
         const length_pos = self.pos;
         try self.serializeTag(depl.lengthWidth, 0);
         const start_pos = self.pos;
@@ -181,7 +180,6 @@ const Serializer = struct {
         const end_pos = self.pos;
         self.pos = length_pos;
 
-        // Write the total byte length
         try self.serializeTag(depl.lengthWidth, end_pos - start_pos);
 
         self.pos = end_pos;

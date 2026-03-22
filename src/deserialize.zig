@@ -95,18 +95,20 @@ pub const Deserializer = struct {
     }
     pub fn deserializeSlice(self: *Deserializer, comptime Child: type, comptime depl: root.ArrayDeployment) (root.SerializeError || error{OutOfMemory})![]Child {
         const size = try self.deserializeTag(depl.lengthWidth);
-        // Check that byteLength is a multiple of element size
-        if (size % @sizeOf(Child) != 0) {
-            return root.SerializeError.InvalidLength; // your custom error
-        }
-        const length = size / @sizeOf(Child);
-        var slice = try self.allocator.alloc(Child, length);
+        const end_pos = self.pos + size;
 
-        for (slice[0..]) |*elem| {
-            elem.* = try self.deserialize(Child);
+        var list = std.ArrayList(Child){};
+        defer list.deinit(self.allocator);
+
+        while (self.pos < end_pos) {
+            try list.append(self.allocator, try self.deserialize(Child));
         }
 
-        return slice;
+        if (self.pos != end_pos) {
+            return root.SerializeError.InvalidLength;
+        }
+
+        return list.toOwnedSlice(self.allocator);
     }
     pub fn deserializeUnion(self: *Deserializer, comptime T: type, comptime depl: root.UnionDeployment) (root.SerializeError || error{OutOfMemory})!T {
         const info = @typeInfo(T);
