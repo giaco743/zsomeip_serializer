@@ -1,23 +1,25 @@
 const std = @import("std");
 const root = @import("root.zig");
 
-pub const Deserializer = struct {
+pub fn deserialize(comptime Out: type, allocator: std.mem.Allocator, input: []const u8) !StripDeployment(Out) {
+    var deser = Deserializer.init(allocator, input);
+    return try deser.deserialize(Out);
+}
+
+const Deserializer = struct {
     allocator: std.mem.Allocator,
     input: []const u8,
     pos: usize = 0, // byte position
 
-    pub fn init(allocator: std.mem.Allocator, input: []const u8) Deserializer {
+    fn init(allocator: std.mem.Allocator, input: []const u8) Deserializer {
         return Deserializer{
             .allocator = allocator,
             .input = input,
             .pos = 0,
         };
     }
-    pub fn reinit(self: *Deserializer, input: []const u8) void {
-        self.input = input;
-    }
 
-    pub fn deserializeInt(self: *Deserializer, comptime T: type) !T {
+    fn deserializeInt(self: *Deserializer, comptime T: type) !T {
         const info = @typeInfo(T);
         switch (info) {
             .int => {
@@ -37,7 +39,7 @@ pub const Deserializer = struct {
             else => @compileError("T must be an integer type"),
         }
     }
-    pub fn deserializeFloat(self: *Deserializer, comptime T: type) !T {
+    fn deserializeFloat(self: *Deserializer, comptime T: type) !T {
         const info = @typeInfo(T);
         if (info != .float)
             @compileError("T must be a float type");
@@ -54,7 +56,7 @@ pub const Deserializer = struct {
         return @bitCast(resultAsInt);
     }
 
-    pub fn deserializeTag(self: *Deserializer, comptime widthType: root.Width) !WidthToType(widthType) {
+    fn deserializeTag(self: *Deserializer, comptime widthType: root.Width) !WidthToType(widthType) {
         switch (widthType) {
             .U8 => {
                 const result: u8 = try self.deserializeInt(WidthToType(widthType));
@@ -70,7 +72,7 @@ pub const Deserializer = struct {
             },
         }
     }
-    pub fn deserializeString(self: *Deserializer, length: usize) ![]const u8 {
+    fn deserializeString(self: *Deserializer, length: usize) ![]const u8 {
         if (self.input[self.pos..].len < length)
             return root.SerializeError.BufferOverflow;
         const BOM = [3]u8{ 0xEF, 0xBB, 0xBF };
@@ -83,21 +85,21 @@ pub const Deserializer = struct {
         self.pos += length;
         return buf;
     }
-    pub fn deserializeDynamicString(self: *Deserializer, comptime depl: root.DynamicStringDeployment) ![]const u8 {
+    fn deserializeDynamicString(self: *Deserializer, comptime depl: root.DynamicStringDeployment) ![]const u8 {
         const length = try self.deserializeTag(depl.lengthWidth);
         return try self.deserializeString(length);
     }
-    pub fn deserializeFixedString(self: *Deserializer, comptime length: u64) ![]const u8 {
+    fn deserializeFixedString(self: *Deserializer, comptime length: u64) ![]const u8 {
         return try self.deserializeString(length);
     }
-    pub fn deserializeArray(self: *Deserializer, comptime T: type, comptime Size: usize) ![Size]T {
+    fn deserializeArray(self: *Deserializer, comptime T: type, comptime Size: usize) ![Size]T {
         var result: [Size]T = undefined;
         for (0..Size) |i| {
             result[i] = try self.deserialize(T);
         }
         return result;
     }
-    pub fn deserializeSlice(self: *Deserializer, comptime Child: type, comptime depl: root.ArrayDeployment) (root.SerializeError || error{OutOfMemory})![]Child {
+    fn deserializeSlice(self: *Deserializer, comptime Child: type, comptime depl: root.ArrayDeployment) (root.SerializeError || error{OutOfMemory})![]Child {
         const size = try self.deserializeTag(depl.lengthWidth);
         const end_pos = self.pos + size;
 
@@ -114,7 +116,7 @@ pub const Deserializer = struct {
 
         return list.toOwnedSlice(self.allocator);
     }
-    pub fn deserializeUnion(self: *Deserializer, comptime T: type, comptime depl: root.UnionDeployment) (root.SerializeError || error{OutOfMemory})!T {
+    fn deserializeUnion(self: *Deserializer, comptime T: type, comptime depl: root.UnionDeployment) (root.SerializeError || error{OutOfMemory})!T {
         const info = @typeInfo(T);
         if (info != .@"union")
             @compileError("T must be a float type");
@@ -129,7 +131,7 @@ pub const Deserializer = struct {
         }
         return error.InvalidUnionTag;
     }
-    pub fn deserialize(self: *Deserializer, comptime T: type) !StripDeployment(T) {
+    fn deserialize(self: *Deserializer, comptime T: type) !StripDeployment(T) {
         const deployed = comptime root.is_deployed(T);
 
         const StrippedType = StripDeployment(T);

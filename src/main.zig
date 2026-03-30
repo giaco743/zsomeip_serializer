@@ -123,9 +123,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const input = buffer;
-    var deser = root.Deserializer.init(gpa.allocator(), input[0..]);
 
-    const message = try deser.deserialize(DeployedArrayMessage);
+    const message = try root.deserialize(DeployedArrayMessage, gpa.allocator(), input[0..]);
     std.debug.print("Deserialized {any}", .{message});
     gpa.allocator().free(message.array_a);
     gpa.allocator().free(message.array_b);

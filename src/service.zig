@@ -2,7 +2,7 @@ const std = @import("std");
 const root = @import("root.zig");
 const Header = @import("protocol.zig").Header;
 pub const serialize = @import("serialize.zig").serialize;
-pub const Deserializer = @import("deserialize.zig").Deserializer;
+pub const deserialize = @import("deserialize.zig").deserialize;
 pub const MethodError = @import("protocol.zig").MethodError;
 pub const Test = @import("protocol.zig").Test;
 
@@ -22,8 +22,7 @@ pub fn handleRequest(
     }
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-    var header_deserializer = Deserializer.init(gpa.allocator(), header_buf[0..]);
-    const header = try header_deserializer.deserialize(Header);
+    const header = try deserialize(Header, gpa.allocator(), header_buf[0..]);
 
     const payload_len = header.length - 8;
     var payload_buf: [1024]u8 = undefined;
@@ -33,8 +32,11 @@ pub fn handleRequest(
         return MethodError.InvalidInput;
     }
 
-    var payload_deserializer = Deserializer.init(gpa.allocator(), payload_buf[0..payload_len]);
-    const request = try payload_deserializer.deserialize(Test);
+    const request = try deserialize(
+        Test,
+        gpa.allocator(),
+        payload_buf[0..payload_len],
+    );
 
     std.debug.print("Received: a: {d}, b: {d}, c: {d}, text: {s}", .{
         request.a,
