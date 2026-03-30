@@ -13,6 +13,9 @@ pub const Deserializer = struct {
             .pos = 0,
         };
     }
+    pub fn reinit(self: *Deserializer, input: []const u8) void {
+        self.input = input;
+    }
 
     pub fn deserializeInt(self: *Deserializer, comptime T: type) !T {
         const info = @typeInfo(T);
@@ -75,9 +78,10 @@ pub const Deserializer = struct {
             return root.SerializeError.BomMissing;
         if (self.input[self.pos + length - 1] != 0)
             return root.SerializeError.NullMissing;
-        const result = self.input[self.pos + 3 .. self.pos + (length - 1)];
+        var buf = try self.allocator.alloc(u8, length - 4);
+        @memcpy(buf[0..], self.input[self.pos + 3 .. self.pos + length - 1]);
         self.pos += length;
-        return result;
+        return buf;
     }
     pub fn deserializeDynamicString(self: *Deserializer, comptime depl: root.DynamicStringDeployment) ![]const u8 {
         const length = try self.deserializeTag(depl.lengthWidth);
@@ -133,6 +137,9 @@ pub const Deserializer = struct {
 
         const info = @typeInfo(InnerType);
         switch (info) {
+            .@"enum" => |e| {
+                return @enumFromInt(try self.deserializeInt(e.tag_type));
+            },
             .@"struct" => |s| {
                 var result: StrippedType = undefined;
                 if (deployed) {

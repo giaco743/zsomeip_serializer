@@ -1,6 +1,8 @@
 const std = @import("std");
 const root = @import("root.zig");
 
+const callMethod = @import("protocol.zig").callMethod;
+
 const Message = struct {
     a: u3,
     b: u3,
@@ -16,6 +18,25 @@ const EightMessages = struct {
     seven: Message,
     eight: Message,
 };
+
+const Greet = struct {
+    greeting: []const u8,
+};
+
+fn sendRequest() !void {
+    const client_fd = try std.os.socket(.unix, .stream, 0);
+    try std.os.connect(client_fd, "tmp/service");
+
+    const greet: Greet = Greet{ .greeting = "hello my friend!" };
+
+    std.debug.print("Sending: {}", .{
+        greet.greeting,
+    });
+    const greet_back: Greet = callMethod(Greet, 1234, 5678, greet, client_fd, client_fd);
+    std.debug.print("Received: {}", .{
+        greet_back.greeting,
+    });
+}
 
 pub fn main() !void {
     // const one = Message{

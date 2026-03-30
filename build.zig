@@ -17,6 +17,24 @@ pub fn build(b: *std.Build) void {
     exe.linkLibrary(lib);
     b.installArtifact(exe);
 
+    const client_mod = b.addModule("client", .{
+        .root_source_file = b.path("src/client.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const client_exe = b.addExecutable(.{ .name = "client", .root_module = client_mod });
+    client_exe.linkLibrary(lib);
+    b.installArtifact(client_exe);
+
+    const service_mod = b.addModule("service", .{
+        .root_source_file = b.path("src/service.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const service_exe = b.addExecutable(.{ .name = "service", .root_module = service_mod });
+    service_exe.linkLibrary(lib);
+    b.installArtifact(service_exe);
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     const run_step = b.step("run", "Run the app");

@@ -19,6 +19,9 @@ const Serializer = struct {
         const info = @typeInfo(ActualType);
 
         switch (info) {
+            .@"enum" => |e| {
+                try self.serializeInt(e.tag_type, @intFromEnum(value));
+            },
             .@"struct" => {
                 if (deployed) {
                     try self.serializeStruct(ActualType, T.Depl, value.value);
