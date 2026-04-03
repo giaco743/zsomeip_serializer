@@ -9,6 +9,7 @@ const Greet = struct {
 };
 
 const testFunction = proxy.bindMethod(protocol.Test, protocol.Test, 1234, 5678);
+const voidFunction = proxy.bindMethod(void, void, 1234, 6666);
 
 pub fn main() !void {
     const stream = try std.net.connectUnixSocket("/tmp/service.sock");
@@ -31,4 +32,8 @@ pub fn main() !void {
         response.c,
         response.text,
     });
+    std.Thread.sleep(1000000000);
+    try voidFunction(&prxy, void{});
+    std.debug.print("Called void function", .{});
+    std.Thread.sleep(1000000000);
 }

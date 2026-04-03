@@ -7,31 +7,42 @@ const SerializeError = @import("root.zig").SerializeError;
 
 pub const StubError = protocol.MethodError || SerializeError || std.net.Stream.WriteError || std.net.Stream.ReadError || std.mem.Allocator.Error;
 
-pub const MethodDef = struct {
-    method_id: u16,
-    method: fn (std.mem.Allocator, []const u8) (std.mem.Allocator.Error || SerializeError)![]u8,
-};
-
 pub fn handleRequests(
-    comptime Methods: []const MethodDef,
+    comptime Methods: []const protocol.MethodDef,
+    comptime Handlers: type,
+    handlers: Handlers,
 ) fn (*std.net.Stream, std.mem.Allocator) StubError!void {
+    const fields = @typeInfo(Handlers).@"struct".fields;
+    comptime {
+        if (fields.len != Methods.len) {
+            @compileError("Handlers length does not match method definitions length.");
+        }
+    }
     return struct {
         fn wrapper(stream: *std.net.Stream, alloc: std.mem.Allocator) !void {
             while (true) {
                 var header_buffer = [_]u8{0} ** 16;
                 const n_header = try stream.read(header_buffer[0..]);
+                std.debug.print("Read {}  bytes", .{n_header});
+                if (n_header == 0) {
+                    std.debug.print("Connection closed", .{});
+                    return;
+                }
                 if (n_header != 16)
                     return protocol.MethodError.InvalidHeader;
                 const header = try deserialize(protocol.Header, alloc, header_buffer[0..]);
+                std.debug.print("Received request {}.", .{header.method_id});
+
                 var buffer = try alloc.alloc(u8, header.length - 8);
+                defer alloc.free(buffer[0..]);
                 const n_buffer = try stream.read(buffer[0..]);
+
                 if (n_buffer != buffer.len)
                     return protocol.MethodError.InvalidInput;
 
-                inline for (Methods) |method| {
-                    if (header.method_id == method.method_id) {
-                        const response_bytes = try method.method(alloc, buffer[0..]);
-                        defer alloc.free(buffer[0..]);
+                inline for (0..Methods.len) |index| {
+                    if (header.method_id == Methods[index].method_id) {
+                        const response_bytes = try bindHandler(Methods[index].In, Methods[index].Out, @field(handlers, fields[index].name))(alloc, buffer[0..]);
                         try stream.writeAll(response_bytes);
                     }
                 }

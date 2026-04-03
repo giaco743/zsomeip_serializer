@@ -19,6 +19,7 @@ const Serializer = struct {
         const info = @typeInfo(ActualType);
 
         switch (info) {
+            .void => return void{},
             .@"enum" => |e| {
                 try self.serializeInt(e.tag_type, @intFromEnum(value));
             },

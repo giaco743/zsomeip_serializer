@@ -40,6 +40,12 @@ const Message = struct {
     payload: []const u8,
 };
 
+pub const MethodDef = struct {
+    In: type,
+    Out: type,
+    method_id: u16,
+};
+
 pub const Test = struct {
     a: u8,
     b: u16,

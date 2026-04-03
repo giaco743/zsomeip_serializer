@@ -28,6 +28,7 @@ pub const Proxy = struct {
         method_id: u16,
         input: anytype,
     ) ProxyError!StripDeployment(Out) {
+        std.debug.print("Calling method {}.", .{method_id});
         var buffer = [_]u8{0} ** 1024;
         const payload = buffer[16..];
         const length = try serialize(input, payload);
@@ -54,7 +55,11 @@ pub const Proxy = struct {
         }
 
         const response_header = try deserialize(protocol.Header, self.allocator, response_header_buffer[0..]);
+        std.debug.print("Received response for {}.", .{response_header.method_id});
         const payload_len = response_header.length - 8;
+
+        if (Out == void)
+            return void{};
 
         var heap_buf: ?[]u8 = null;
         var stack_buf = [_]u8{0} ** 1024;
@@ -84,3 +89,22 @@ pub fn bindMethod(comptime In: type, comptime Out: type, comptime service_id: u1
         }
     }.wrapper;
 }
+
+// pub fn generateProxyMethods(
+//     comptime Methods: protocol.MethodDef,
+//     comptime MethodNames: type,
+// ) type {
+//     const fields = @typeInfo(MethodNames).@"struct".fields;
+//     comptime {
+//         if (fields.len != Methods.len) {
+//             @compileError("Handlers length does not match method definitions length.");
+//         }
+//     }
+
+//     return @Type(.{ .@"struct" = .{
+//         .layout = s.layout,
+//         .fields = &fields,
+//         .decls = &.{},
+//         .is_tuple = false,
+//     } });
+// }

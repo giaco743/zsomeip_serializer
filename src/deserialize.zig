@@ -139,6 +139,10 @@ const Deserializer = struct {
 
         const info = @typeInfo(InnerType);
         switch (info) {
+            .void => {
+                std.debug.print("Recieved void to deserialize", .{});
+                return void{};
+            },
             .@"enum" => |e| {
                 const val = try self.deserializeInt(e.tag_type);
                 std.debug.print("Deserializing enum {s}, got value {x}\n", .{ @typeName(T), val });
