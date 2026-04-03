@@ -140,7 +140,9 @@ const Deserializer = struct {
         const info = @typeInfo(InnerType);
         switch (info) {
             .@"enum" => |e| {
-                return @enumFromInt(try self.deserializeInt(e.tag_type));
+                const val = try self.deserializeInt(e.tag_type);
+                std.debug.print("Deserializing enum {s}, got value {x}\n", .{ @typeName(T), val });
+                return @enumFromInt(val);
             },
             .@"struct" => |s| {
                 var result: StrippedType = undefined;
@@ -263,33 +265,48 @@ fn WidthToType(comptime widthType: root.Width) type {
 }
 
 pub fn StripDeployment(comptime T: type) type {
-    if (root.is_deployed(T))
-        return StripDeployment(T.Inner);
+    return StripDeploymentImpl(T).T;
+}
 
+pub fn StripDeploymentImpl(comptime T: type) struct { T: type, has_depl: bool } {
+    if (root.is_deployed(T)) {
+        return .{ .T = StripDeployment(T.Inner), .has_depl = true };
+    }
+
+    var has_depl = false;
     return switch (@typeInfo(T)) {
         .@"struct" => |s| {
             var fields: [s.fields.len]std.builtin.Type.StructField = undefined;
 
             inline for (s.fields, 0..) |f, i| {
+                const sd_ty = StripDeploymentImpl(f.type);
+                has_depl = sd_ty.has_depl;
                 fields[i] = .{
                     .name = f.name,
-                    .type = StripDeployment(f.type),
+                    .type = sd_ty.T,
                     .default_value_ptr = null,
                     .is_comptime = false,
-                    .alignment = @alignOf(StripDeployment(f.type)),
+                    .alignment = @alignOf(sd_ty.T),
                 };
             }
 
-            return @Type(.{
-                .@"struct" = .{
-                    .layout = s.layout,
-                    .fields = &fields,
-                    .decls = &.{},
-                    .is_tuple = false,
-                },
-            });
+            if (has_depl) {
+                return .{
+                    .T = @Type(.{
+                        .@"struct" = .{
+                            .layout = s.layout,
+                            .fields = &fields,
+                            .decls = &.{},
+                            .is_tuple = false,
+                        },
+                    }),
+                    .has_depl = true,
+                };
+            } else {
+                return .{ .T = T, .has_depl = false };
+            }
         },
 
-        else => return T,
+        else => return .{ .T = T, .has_depl = false },
     };
 }
