@@ -23,6 +23,16 @@ fn handleVoid(_: void) void {
     std.debug.print("Hanlde Void called!", .{});
 }
 
+fn handleInteger(i: u16) u32 {
+    std.debug.print("Hanlde Int called with {}!", .{i});
+    return 1234;
+}
+
+fn handleGreet(greeting: []const u8) []const u8 {
+    std.debug.print("Proxy: {s}", .{greeting});
+    return "Hi proxy, how is it going?";
+}
+
 pub const method_def = [_]protocol.MethodDef{
     .{
         .In = Test,
@@ -36,11 +46,26 @@ pub const method_def = [_]protocol.MethodDef{
         .method_id = 6666,
         .name = "voidF",
     },
+    .{
+        .In = u16,
+        .Out = u32,
+        .method_id = 6969,
+        .name = "intF",
+    },
+
+    .{
+        .In = []const u8,
+        .Out = []const u8,
+        .method_id = 1000,
+        .name = "greet",
+    },
 };
 
 const genHandleRequests = stub.handleRequests(&method_def, .{
     .testF = handleTest,
     .voidF = handleVoid,
+    .intF = handleInteger,
+    .greet = handleGreet,
 });
 
 pub fn main() !void {

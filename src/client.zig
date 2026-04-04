@@ -35,4 +35,14 @@ pub fn main() !void {
     try myProxy.voidF(&prxy, void{});
     std.debug.print("Called void function", .{});
     std.Thread.sleep(1000000000);
+
+    std.Thread.sleep(1000000000);
+    const received = try myProxy.intF(&prxy, 4321);
+    std.debug.print("Called int function, received {}.", .{received});
+    std.Thread.sleep(1000000000);
+
+    std.Thread.sleep(1000000000);
+    const greetResponse = try myProxy.greet(&prxy, "Hey stub, good morning!");
+    std.debug.print("Called greet function, received {s}.", .{greetResponse});
+    std.Thread.sleep(1000000000);
 }
