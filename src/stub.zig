@@ -9,10 +9,9 @@ pub const StubError = protocol.MethodError || SerializeError || std.net.Stream.W
 
 pub fn handleRequests(
     comptime Methods: []const protocol.MethodDef,
-    comptime Handlers: type,
-    handlers: Handlers,
+    handlers: generateHandlers(Methods),
 ) fn (*std.net.Stream, std.mem.Allocator) StubError!void {
-    const fields = @typeInfo(Handlers).@"struct".fields;
+    const fields = @typeInfo(generateHandlers(Methods)).@"struct".fields;
     comptime {
         if (fields.len != Methods.len) {
             @compileError("Handlers length does not match method definitions length.");
@@ -51,7 +50,7 @@ pub fn handleRequests(
     }.wrapper;
 }
 
-pub fn bindHandler(
+fn bindHandler(
     comptime In: type,
     comptime Out: type,
     comptime handler: fn (StripDeployment(In)) Out,
@@ -78,4 +77,26 @@ pub fn bindHandler(
             return buf[0 .. n + 16];
         }
     }.wrapper;
+}
+
+fn generateHandlers(
+    comptime Methods: []const protocol.MethodDef,
+) type {
+    var method_fields: [Methods.len]std.builtin.Type.StructField = undefined;
+    for (0..Methods.len) |i| {
+        method_fields[i] = std.builtin.Type.StructField{
+            .alignment = 8,
+            .default_value_ptr = null,
+            .is_comptime = false,
+            .name = Methods[i].name,
+            .type = fn (Methods[i].In) Methods[i].Out,
+        };
+    }
+
+    return @Type(.{ .@"struct" = .{
+        .layout = .auto,
+        .fields = &method_fields,
+        .decls = &.{},
+        .is_tuple = false,
+    } });
 }

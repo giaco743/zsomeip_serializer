@@ -44,6 +44,7 @@ pub const MethodDef = struct {
     In: type,
     Out: type,
     method_id: u16,
+    name: [:0]const u8,
 };
 
 pub const Test = struct {

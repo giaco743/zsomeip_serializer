@@ -28,18 +28,17 @@ pub const method_def = [_]protocol.MethodDef{
         .In = Test,
         .Out = Test,
         .method_id = 5678,
+        .name = "testF",
     },
     .{
         .In = void,
         .Out = void,
         .method_id = 6666,
+        .name = "voidF",
     },
 };
 
-const genHandleRequests = stub.handleRequests(&method_def, struct {
-    testF: fn (Test) Test,
-    voidF: fn (void) void,
-}, .{
+const genHandleRequests = stub.handleRequests(&method_def, .{
     .testF = handleTest,
     .voidF = handleVoid,
 });

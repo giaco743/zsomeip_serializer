@@ -1,9 +1,9 @@
 const std = @import("std");
-pub const SerializeError = @import("root.zig").SerializeError;
-pub const serialize = @import("serialize.zig").serialize;
-pub const deserialize = @import("deserialize.zig").deserialize;
-pub const StripDeployment = @import("root.zig").StripDeployment;
-pub const protocol = @import("protocol.zig");
+const SerializeError = @import("root.zig").SerializeError;
+const serialize = @import("serialize.zig").serialize;
+const deserialize = @import("deserialize.zig").deserialize;
+const StripDeployment = @import("root.zig").StripDeployment;
+const protocol = @import("protocol.zig");
 
 pub const ProxyError = protocol.MethodError || SerializeError || std.net.Stream.WriteError || std.net.Stream.ReadError || std.mem.Allocator.Error;
 
@@ -21,7 +21,7 @@ pub const Proxy = struct {
         };
     }
 
-    pub fn callMethod(
+    fn callMethod(
         self: *const Proxy,
         comptime Out: type,
         service_id: u16,
@@ -81,7 +81,7 @@ pub const Proxy = struct {
     }
 };
 
-pub fn bindMethod(comptime In: type, comptime Out: type, comptime service_id: u16, comptime method_id: u16) fn (proxy: *Proxy, input: In) ProxyError!StripDeployment(Out) {
+fn bindMethod(comptime In: type, comptime Out: type, comptime service_id: u16, comptime method_id: u16) fn (proxy: *Proxy, input: In) ProxyError!StripDeployment(Out) {
     // returns a function that calls callMethod with baked IDs
     return struct {
         fn wrapper(proxy: *Proxy, input: In) ProxyError!StripDeployment(Out) {
@@ -90,21 +90,35 @@ pub fn bindMethod(comptime In: type, comptime Out: type, comptime service_id: u1
     }.wrapper;
 }
 
-// pub fn generateProxyMethods(
-//     comptime Methods: protocol.MethodDef,
-//     comptime MethodNames: type,
-// ) type {
-//     const fields = @typeInfo(MethodNames).@"struct".fields;
-//     comptime {
-//         if (fields.len != Methods.len) {
-//             @compileError("Handlers length does not match method definitions length.");
-//         }
-//     }
+fn generateProxyMethodsType(
+    comptime Methods: []const protocol.MethodDef,
+) type {
+    var method_fields: [Methods.len]std.builtin.Type.StructField = undefined;
+    for (0..Methods.len) |i| {
+        method_fields[i] = std.builtin.Type.StructField{
+            .alignment = 8,
+            .default_value_ptr = null,
+            .is_comptime = false,
+            .name = Methods[i].name,
+            .type = fn (*Proxy, Methods[i].In) ProxyError!Methods[i].Out,
+        };
+    }
 
-//     return @Type(.{ .@"struct" = .{
-//         .layout = s.layout,
-//         .fields = &fields,
-//         .decls = &.{},
-//         .is_tuple = false,
-//     } });
-// }
+    return @Type(.{ .@"struct" = .{
+        .layout = .auto,
+        .fields = &method_fields,
+        .decls = &.{},
+        .is_tuple = false,
+    } });
+}
+
+pub fn makeProxyMethods(
+    comptime Methods: []const protocol.MethodDef,
+) generateProxyMethodsType(Methods) {
+    const T = generateProxyMethodsType(Methods);
+    var val: T = undefined;
+    inline for (Methods) |M| {
+        @field(val, M.name) = bindMethod(M.In, M.Out, 1234, M.method_id);
+    }
+    return val;
+}
