@@ -40,14 +40,9 @@ The entry point for serialization is the generic `serialize` function, that uses
 
     const slice = try allocator.alloc(u8, 100);
     defer allocator.free(slice);
-    const size = try zsip.serialize.serialize(given, slice[0..]);
+    const size = try zsip.serialize(given, slice[0..]);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var deser = zsip.deserialize.Deserializer.init(gpa.allocator(), expected[0..]);
-    defer deser.deinit();
-
-    const deserialized = try deser.deserialize(Test);
+    const deserialized = try zsip.deserialize(Test, allocator, slice[0..size]);
 ```
 
 ## Deployment Parameters
@@ -64,3 +59,56 @@ SomeIP allows for customizing the serialization of a specific type according to 
     - type width
 
 The deployment has to match the provided type otherwise the call to `serialize` will return a `WrongDeployment` error.
+
+## Proxys and Stubs
+
+Stubs and proxys for a specific service can be defined, by providing method definitions:
+
+```rust
+pub const method_def = [_]protocol.MethodDef{
+    .{
+        .In = Test,
+        .Out = Test,
+        .method_id = 5678,
+        .name = "testF",
+    },
+    .{
+        .In = void,
+        .Out = void,
+        .method_id = 6666,
+        .name = "voidF",
+    },
+    .{
+        .In = u16,
+        .Out = u32,
+        .method_id = 6969,
+        .name = "intF",
+    },
+
+    .{
+        .In = []const u8,
+        .Out = []const u8,
+        .method_id = 1000,
+        .name = "greet",
+    },
+};
+```
+
+Stub handlers can be connected via:
+
+```rust
+const stubImpl = stub.handleRequests(&method_def, .{
+    .testF = handleTest,
+    .voidF = handleVoid,
+    .intF = handleInteger,
+    .greet = handleGreet,
+});
+stubImpl(&conn.stream, gpa.allocator());
+```
+
+For the proxy we can just pass the method definitions:
+
+```rust
+const myProxy = proxy.makeProxyMethods(service.method_def[0..]);
+const response = try myProxy.testF(&proxy, request);
+```
