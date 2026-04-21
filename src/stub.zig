@@ -5,12 +5,12 @@ const deserialize = @import("deserialize.zig").deserialize;
 const StripDeployment = @import("deserialize.zig").StripDeployment;
 const SerializeError = @import("root.zig").SerializeError;
 
-pub const StubError = protocol.MethodError || SerializeError || std.net.Stream.WriteError || std.net.Stream.ReadError || std.mem.Allocator.Error;
+pub const StubError = protocol.MethodError || SerializeError || std.Io.Writer.Error || std.Io.Reader.Error || std.mem.Allocator.Error || std.Io.Cancelable;
 
 pub fn handleRequests(
     comptime Methods: []const protocol.MethodDef,
     handlers: generateHandlers(Methods),
-) fn (*std.net.Stream, std.mem.Allocator) StubError!void {
+) fn (std.Io, *std.Io.net.Stream, std.mem.Allocator) StubError!void {
     const fields = @typeInfo(generateHandlers(Methods)).@"struct".fields;
     comptime {
         if (fields.len != Methods.len) {
@@ -18,31 +18,41 @@ pub fn handleRequests(
         }
     }
     return struct {
-        fn wrapper(stream: *std.net.Stream, alloc: std.mem.Allocator) !void {
+        fn wrapper(io: std.Io, stream: *std.Io.net.Stream, alloc: std.mem.Allocator) !void {
+            std.debug.print("Received request\n", .{});
+            var r_buffer: [1028]u8 = undefined;
+            var w_buffer: [1028]u8 = undefined;
+            var stream_reader = stream.reader(io, r_buffer[0..]);
+            var stream_writer = stream.writer(io, w_buffer[0..]);
+            var reader = &stream_reader.interface;
+            var writer = &stream_writer.interface;
+
             while (true) {
-                var header_buffer = [_]u8{0} ** 16;
-                const n_header = try stream.read(header_buffer[0..]);
-                std.debug.print("Read {}  bytes", .{n_header});
-                if (n_header == 0) {
-                    std.debug.print("Connection closed", .{});
+                var header_bytes: [16]u8 = undefined;
+                std.debug.print("Reading header\n", .{});
+                reader.readSliceAll(header_bytes[0..]) catch {
+                    std.debug.print("Connection closed.\n", .{});
                     return;
-                }
-                if (n_header != 16)
-                    return protocol.MethodError.InvalidHeader;
-                const header = try deserialize(protocol.Header, alloc, header_buffer[0..]);
-                std.debug.print("Received request {}.", .{header.method_id});
+                };
 
-                var buffer = try alloc.alloc(u8, header.length - 8);
-                defer alloc.free(buffer[0..]);
-                const n_buffer = try stream.read(buffer[0..]);
+                std.debug.print("Deserializing header\n", .{});
+                const header = try deserialize(protocol.Header, alloc, header_bytes[0..]);
+                std.debug.print("Received request {}.\n", .{header.method_id});
 
-                if (n_buffer != buffer.len)
-                    return protocol.MethodError.InvalidInput;
+                if (header.length < 8)
+                    return StubError.InvalidHeader;
+
+                const payload_len = header.length - 8;
+                var payload = try alloc.alloc(u8, payload_len);
+                defer alloc.free(payload[0..]);
+
+                try reader.readSliceAll(payload[0..]);
 
                 inline for (0..Methods.len) |index| {
                     if (header.method_id == Methods[index].method_id) {
-                        const response_bytes = try bindHandler(Methods[index].In, Methods[index].Out, @field(handlers, fields[index].name))(alloc, buffer[0..]);
-                        try stream.writeAll(response_bytes);
+                        const response_bytes = try bindHandler(Methods[index].In, Methods[index].Out, @field(handlers, fields[index].name))(alloc, payload[0..]);
+                        try writer.writeAll(response_bytes);
+                        try writer.flush();
                     }
                 }
             }
@@ -82,21 +92,12 @@ fn bindHandler(
 fn generateHandlers(
     comptime Methods: []const protocol.MethodDef,
 ) type {
-    var method_fields: [Methods.len]std.builtin.Type.StructField = undefined;
+    var field_names: [10][]const u8 = undefined;
+    var field_types: [10]type = undefined;
     for (0..Methods.len) |i| {
-        method_fields[i] = std.builtin.Type.StructField{
-            .alignment = 8,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .name = Methods[i].name,
-            .type = fn (Methods[i].In) Methods[i].Out,
-        };
+        field_names[i] = Methods[i].name;
+        field_types[i] = fn (Methods[i].In) Methods[i].Out;
     }
 
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &method_fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    return @Struct(.auto, null, field_names[0..Methods.len], field_types[0..Methods.len], &@splat(.{}));
 }

@@ -61,7 +61,7 @@ pub const method_def = [_]protocol.MethodDef{
     },
 };
 
-const genHandleRequests = stub.handleRequests(&method_def, .{
+const requestHandler = stub.handleRequests(&method_def, .{
     .testF = handleTest,
     .voidF = handleVoid,
     .intF = handleInteger,
@@ -69,15 +69,20 @@ const genHandleRequests = stub.handleRequests(&method_def, .{
 });
 
 pub fn main() !void {
-    const listen_addr = try std.net.Address.initUnix("/tmp/service.sock");
-    var server = try listen_addr.listen(.{ .reuse_address = true });
-    defer server.deinit();
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const path = "/tmp/service.sock";
+    const listen_addr = try std.Io.net.UnixAddress.init(path);
+
+    var server = try listen_addr.listen(io, .{});
+    defer server.deinit(io);
+
+    const alloc = std.heap.smp_allocator;
 
     while (true) {
-        var conn = try server.accept();
+        var conn_stream = try server.accept(io);
 
-        _ = try std.Thread.spawn(.{}, genHandleRequests, .{ &conn.stream, gpa.allocator() });
+        _ = try std.Thread.spawn(.{}, requestHandler, .{ io, &conn_stream, alloc });
     }
 }

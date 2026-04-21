@@ -103,7 +103,7 @@ const Deserializer = struct {
         const size = try self.deserializeTag(depl.lengthWidth);
         const end_pos = self.pos + size;
 
-        var list = std.ArrayList(Child){};
+        var list = try std.ArrayList(Child).initCapacity(self.allocator, 100);
         defer list.deinit(self.allocator);
 
         while (self.pos < end_pos) {
@@ -280,30 +280,19 @@ pub fn StripDeploymentImpl(comptime T: type) struct { T: type, has_depl: bool } 
     var has_depl = false;
     return switch (@typeInfo(T)) {
         .@"struct" => |s| {
-            var fields: [s.fields.len]std.builtin.Type.StructField = undefined;
+            var field_names: [10][]const u8 = undefined;
+            var field_types: [10]type = undefined;
 
             inline for (s.fields, 0..) |f, i| {
                 const sd_ty = StripDeploymentImpl(f.type);
                 has_depl = sd_ty.has_depl;
-                fields[i] = .{
-                    .name = f.name,
-                    .type = sd_ty.T,
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .alignment = @alignOf(sd_ty.T),
-                };
+                field_names[i] = f.name;
+                field_types[i] = f.type;
             }
 
             if (has_depl) {
                 return .{
-                    .T = @Type(.{
-                        .@"struct" = .{
-                            .layout = s.layout,
-                            .fields = &fields,
-                            .decls = &.{},
-                            .is_tuple = false,
-                        },
-                    }),
+                    .T = @Struct(.auto, null, field_names, field_types, &@splat(.{})),
                     .has_depl = true,
                 };
             } else {

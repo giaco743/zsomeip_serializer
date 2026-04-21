@@ -5,33 +5,37 @@ const deserialize = @import("deserialize.zig").deserialize;
 const StripDeployment = @import("root.zig").StripDeployment;
 const protocol = @import("protocol.zig");
 
-pub const ProxyError = protocol.MethodError || SerializeError || std.net.Stream.WriteError || std.net.Stream.ReadError || std.mem.Allocator.Error;
+pub const ProxyError = protocol.MethodError || SerializeError || std.Io.Writer.Error || std.Io.Reader.Error || std.mem.Allocator.Error || std.Io.Cancelable;
 
 pub const Proxy = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
-    stream: std.net.Stream,
+    stream: std.Io.net.Stream,
 
     pub fn init(
+        io: std.Io,
         alloc: std.mem.Allocator,
-        stream: std.net.Stream,
+        stream: std.Io.net.Stream,
     ) Proxy {
         return Proxy{
+            .io = io,
             .allocator = alloc,
             .stream = stream,
         };
     }
 
     fn callMethod(
-        self: *const Proxy,
+        self: *Proxy,
         comptime Out: type,
         service_id: u16,
         method_id: u16,
         input: anytype,
     ) ProxyError!StripDeployment(Out) {
-        std.debug.print("Calling method {}.", .{method_id});
-        var buffer = [_]u8{0} ** 1024;
-        const payload = buffer[16..];
+        std.debug.print("Calling method {}.\n", .{method_id});
+        var input_bytes = [_]u8{0} ** 1024;
+        const payload = input_bytes[16..];
         const length = try serialize(input, payload);
+        std.debug.print("Searialized input with length {}.\n", .{length});
 
         const header = protocol.Header{
             .service_id = service_id,
@@ -44,25 +48,39 @@ pub const Proxy = struct {
             .message_type = .Request,
             .return_code = .EOk,
         };
-        _ = try serialize(header, buffer[0..16]);
+        const header_length = try serialize(header, input_bytes[0..16]);
+        std.debug.print("Searialized header with length {}.\n", .{header_length});
 
-        try self.stream.writeAll(buffer[0 .. length + 16]);
+        std.debug.print("Searialized input.\n", .{});
+        var w_buffer: [1024]u8 = undefined;
 
-        var response_header_buffer: [16]u8 = [_]u8{0} ** 16;
-        const n_header = try self.stream.read(&response_header_buffer);
-        if (n_header != 16) {
-            return protocol.MethodError.InvalidHeader;
+        var stream_writer = self.stream.writer(self.io, &w_buffer);
+        var writer = &stream_writer.interface;
+        try writer.writeAll(input_bytes[0 .. length + 16]);
+        try writer.flush();
+        std.debug.print("Sent input: {any}.\n", .{input_bytes[0 .. length + 16]});
+
+        var r_buffer: [1024]u8 = undefined;
+        var response_header_bytes: [16]u8 = undefined;
+        var stream_reader = self.stream.reader(self.io, &r_buffer);
+        var reader = &stream_reader.interface;
+
+        std.debug.print("Before reading.\n", .{});
+        try reader.readSliceAll(response_header_bytes[0..]);
+        std.debug.print("After reading.\n", .{});
+
+        const response_header = try deserialize(protocol.Header, self.allocator, response_header_bytes[0..]);
+        const payload_len = response_header.length - 8;
+        std.debug.print("Received response for {} with payload length {}.", .{ response_header.method_id, payload_len });
+
+        if (Out == void) {
+            if (payload_len != 0)
+                return ProxyError.InvalidInput;
+            return void{};
         }
 
-        const response_header = try deserialize(protocol.Header, self.allocator, response_header_buffer[0..]);
-        std.debug.print("Received response for {}.", .{response_header.method_id});
-        const payload_len = response_header.length - 8;
-
-        if (Out == void)
-            return void{};
-
         var heap_buf: ?[]u8 = null;
-        var stack_buf = [_]u8{0} ** 1024;
+        var stack_buf: [1024]u8 = undefined;
         const buf = if (payload_len <= stack_buf.len)
             stack_buf[0..payload_len]
         else blk: {
@@ -72,10 +90,7 @@ pub const Proxy = struct {
         };
         defer if (heap_buf) |b| self.allocator.free(b);
 
-        const n_payload = try self.stream.read(buf);
-        if (n_payload != payload_len) {
-            return protocol.MethodError.InvalidInput;
-        }
+        try reader.readSliceAll(buf);
 
         return try deserialize(Out, self.allocator, buf);
     }
@@ -93,23 +108,20 @@ fn bindMethod(comptime In: type, comptime Out: type, comptime service_id: u16, c
 fn generateProxyMethodsType(
     comptime Methods: []const protocol.MethodDef,
 ) type {
-    var method_fields: [Methods.len]std.builtin.Type.StructField = undefined;
+    var field_names: [10][]const u8 = undefined;
+    var field_types: [10]type = undefined;
     for (0..Methods.len) |i| {
-        method_fields[i] = std.builtin.Type.StructField{
-            .alignment = 8,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .name = Methods[i].name,
-            .type = fn (*Proxy, Methods[i].In) ProxyError!Methods[i].Out,
-        };
+        field_names[i] = Methods[i].name;
+        field_types[i] = fn (*Proxy, Methods[i].In) ProxyError!Methods[i].Out;
     }
 
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &method_fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    return @Struct(
+        .auto,
+        null,
+        field_names[0..Methods.len],
+        field_types[0..Methods.len],
+        &@splat(.{}),
+    );
 }
 
 pub fn makeProxyMethods(

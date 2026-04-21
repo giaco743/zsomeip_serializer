@@ -120,12 +120,11 @@ pub fn main() !void {
     std.debug.print("Twentyfirst byte: {b:0>8}\n", .{buffer[20]});
     std.debug.print("Twentysecond byte: {b:0>8}\n", .{buffer[21]});
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var alloc = std.heap.smp_allocator;
     const input = buffer;
 
-    const message = try root.deserialize(DeployedArrayMessage, gpa.allocator(), input[0..]);
+    const message = try root.deserialize(DeployedArrayMessage, alloc, input[0..]);
     std.debug.print("Deserialized {any}", .{message});
-    gpa.allocator().free(message.array_a);
-    gpa.allocator().free(message.array_b);
+    alloc.free(message.array_a);
+    alloc.free(message.array_b);
 }

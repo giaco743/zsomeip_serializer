@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const exe = b.addExecutable(.{ .name = "zsip", .root_module = exe_mod });
-    exe.linkLibrary(lib);
+    exe.root_module.linkLibrary(lib);
     b.installArtifact(exe);
 
     const client_mod = b.addModule("client", .{
@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const client_exe = b.addExecutable(.{ .name = "client", .root_module = client_mod });
-    client_exe.linkLibrary(lib);
+    client_exe.root_module.linkLibrary(lib);
     b.installArtifact(client_exe);
 
     const service_mod = b.addModule("service", .{
@@ -32,7 +32,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const service_exe = b.addExecutable(.{ .name = "service", .root_module = service_mod });
-    service_exe.linkLibrary(lib);
+    service_exe.root_module.linkLibrary(lib);
     b.installArtifact(service_exe);
 
     const run_cmd = b.addRunArtifact(exe);
