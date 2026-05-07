@@ -11,13 +11,10 @@ test "u16 array" {
 
     try std.testing.expectEqualSlices(u8, buffer[0..size], expected);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var deser = zsip.Deserializer.init(gpa.allocator(), expected[0..]);
-
-    const deserialized = try deser.deserialize(@TypeOf(input));
+    const alloc = std.heap.smp_allocator;
+    const deserialized = try zsip.deserialize(@TypeOf(input), alloc, expected[0..]);
     try std.testing.expectEqualSlices(u16, array[0..], deserialized[0..]);
-    gpa.allocator().free(deserialized);
+    alloc.free(deserialized);
 }
 
 test "u8 array" {
@@ -30,13 +27,10 @@ test "u8 array" {
 
     try std.testing.expectEqualSlices(u8, buffer[0..size], expected);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var deser = zsip.Deserializer.init(gpa.allocator(), expected[0..]);
-
-    const deserialized = try deser.deserialize(@TypeOf(input));
+    const alloc = std.heap.smp_allocator;
+    const deserialized = try zsip.deserialize(@TypeOf(input), alloc, expected[0..]);
     try std.testing.expectEqualSlices(u8, array[0..], deserialized[0..]);
-    gpa.allocator().free(deserialized);
+    alloc.free(deserialized);
 }
 
 test "u8 string" {
@@ -49,10 +43,7 @@ test "u8 string" {
 
     try std.testing.expectEqualSlices(u8, buffer[0..size], expected);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var deser = zsip.Deserializer.init(gpa.allocator(), expected[0..]);
-
-    const deserialized = try deser.deserialize([]const u8);
+    const alloc = std.heap.smp_allocator;
+    const deserialized = try zsip.deserialize([]const u8, alloc, expected[0..]);
     try std.testing.expectEqualStrings(input, deserialized);
 }

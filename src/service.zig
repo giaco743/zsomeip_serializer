@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub const stub = @import("stub.zig");
 pub const protocol = @import("protocol.zig");
-pub const StripDeployment = @import("deserialize.zig").StripDeployment;
+pub const StripDeployment = @import("root.zig").StripDeployment;
 
 pub const Test = @import("protocol.zig").Test;
 

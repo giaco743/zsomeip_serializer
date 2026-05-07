@@ -1,0 +1,5 @@
+{
+    "zig.libPath": "",
+    "zig.path": "/snap/bin/zig",
+    "zig.zls.path": "/usr/bin/zls"
+}

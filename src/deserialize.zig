@@ -1,7 +1,7 @@
 const std = @import("std");
 const root = @import("root.zig");
 
-pub fn deserialize(comptime Out: type, allocator: std.mem.Allocator, input: []const u8) !StripDeployment(Out) {
+pub fn deserialize(comptime Out: type, allocator: std.mem.Allocator, input: []const u8) !root.StripDeployment(Out) {
     var deser = Deserializer.init(allocator, input);
     return try deser.deserialize(Out);
 }
@@ -56,18 +56,18 @@ const Deserializer = struct {
         return @bitCast(resultAsInt);
     }
 
-    fn deserializeTag(self: *Deserializer, comptime widthType: root.Width) !WidthToType(widthType) {
+    fn deserializeTag(self: *Deserializer, comptime widthType: root.Width) !root.WidthToType(widthType) {
         switch (widthType) {
             .U8 => {
-                const result: u8 = try self.deserializeInt(WidthToType(widthType));
+                const result: u8 = try self.deserializeInt(root.WidthToType(widthType));
                 return result;
             },
             .U16 => {
-                const result: u16 = try self.deserializeInt(WidthToType(widthType));
+                const result: u16 = try self.deserializeInt(root.WidthToType(widthType));
                 return result;
             },
             .U32 => {
-                const result: u32 = try self.deserializeInt(WidthToType(widthType));
+                const result: u32 = try self.deserializeInt(root.WidthToType(widthType));
                 return result;
             },
         }
@@ -131,10 +131,10 @@ const Deserializer = struct {
         }
         return error.InvalidUnionTag;
     }
-    fn deserialize(self: *Deserializer, comptime T: type) !StripDeployment(T) {
+    fn deserialize(self: *Deserializer, comptime T: type) !root.StripDeployment(T) {
         const deployed = comptime root.is_deployed(T);
 
-        const StrippedType = StripDeployment(T);
+        const StrippedType = root.StripDeployment(T);
         const InnerType = comptime if (deployed) T.Inner else T;
 
         const info = @typeInfo(InnerType);
@@ -259,47 +259,3 @@ const Deserializer = struct {
         }
     }
 };
-
-fn WidthToType(comptime widthType: root.Width) type {
-    return switch (widthType) {
-        .U8 => u8,
-        .U16 => u16,
-        .U32 => u32,
-    };
-}
-
-pub fn StripDeployment(comptime T: type) type {
-    return StripDeploymentImpl(T).T;
-}
-
-pub fn StripDeploymentImpl(comptime T: type) struct { T: type, has_depl: bool } {
-    if (root.is_deployed(T)) {
-        return .{ .T = StripDeployment(T.Inner), .has_depl = true };
-    }
-
-    var has_depl = false;
-    return switch (@typeInfo(T)) {
-        .@"struct" => |s| {
-            var field_names: [10][]const u8 = undefined;
-            var field_types: [10]type = undefined;
-
-            inline for (s.fields, 0..) |f, i| {
-                const sd_ty = StripDeploymentImpl(f.type);
-                has_depl = sd_ty.has_depl;
-                field_names[i] = f.name;
-                field_types[i] = f.type;
-            }
-
-            if (has_depl) {
-                return .{
-                    .T = @Struct(.auto, null, field_names, field_types, &@splat(.{})),
-                    .has_depl = true,
-                };
-            } else {
-                return .{ .T = T, .has_depl = false };
-            }
-        },
-
-        else => return .{ .T = T, .has_depl = false },
-    };
-}

@@ -16,13 +16,11 @@ test "default deployment" {
     const expected = [_]u8{ 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02 };
 
     var buffer: [1024]u8 = undefined; // your buffer
-    _ = try zsip.serialize(givenUnion, &buffer);
+    const bytes_written = try zsip.serialize(givenUnion, &buffer);
+    try std.testing.expectEqualSlices(u8, expected[0..], buffer[0..bytes_written]);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var deser = zsip.Deserializer.init(gpa.allocator(), expected[0..]);
-
-    const deserialized = try deser.deserialize(DeployedTest);
+    const alloc = std.heap.smp_allocator;
+    const deserialized = try zsip.deserialize(DeployedTest, alloc, expected[0..]);
     try std.testing.expectEqual(expectedOut, deserialized);
 }
 
@@ -45,10 +43,7 @@ test "deployment" {
 
     try std.testing.expectEqualSlices(u8, buffer[0..size], &expected);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var deser = zsip.Deserializer.init(gpa.allocator(), expected[0..]);
-
-    const deserialized = try deser.deserialize(DeployedTest);
+    const alloc = std.heap.smp_allocator;
+    const deserialized = try zsip.deserialize(DeployedTest, alloc, expected[0..]);
     try std.testing.expectEqual(expectedOut, deserialized);
 }

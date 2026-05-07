@@ -1,8 +1,10 @@
 const std = @import("std");
 const zsip = @import("libzsip");
 
-test "bench" {
-    const start = std.time.milliTimestamp();
+fn benchmark(alloc: std.mem.Allocator) (std.mem.Allocator.Error || zsip.SerializeError)!void {
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
+    const start = std.Io.Timestamp.now(io, .real);
 
     const Test = struct {
         a: u8,
@@ -10,9 +12,6 @@ test "bench" {
         c: u32,
     };
     const DeployedTest = zsip.Deployed(Test, struct {}{});
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
 
     var buffer: [1024]u8 = undefined; // your buffer
 
@@ -26,9 +25,13 @@ test "bench" {
 
         const size = try zsip.serialize(givenStruct, &buffer);
 
-        var deser = zsip.Deserializer.init(gpa.allocator(), buffer[0..size]);
-        _ = try deser.deserialize(DeployedTest);
+        _ = try zsip.deserialize(DeployedTest, alloc, buffer[0..size]);
     }
-    const end = std.time.milliTimestamp();
-    std.debug.print("elapsed ms = {}\n", .{end - start});
+    const end = std.Io.Timestamp.now(io, .real);
+    std.debug.print("elapsed ns = {}\n", .{start.durationTo(end)});
+}
+
+test "bench" {
+    const alloc = std.testing.allocator;
+    try std.testing.checkAllAllocationFailures(alloc, benchmark, .{});
 }

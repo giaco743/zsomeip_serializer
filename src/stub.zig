@@ -2,8 +2,9 @@ const std = @import("std");
 const protocol = @import("protocol.zig");
 const serialize = @import("serialize.zig").serialize;
 const deserialize = @import("deserialize.zig").deserialize;
-const StripDeployment = @import("deserialize.zig").StripDeployment;
-const SerializeError = @import("root.zig").SerializeError;
+const root = @import("root.zig");
+const SerializeError = root.SerializeError;
+const StripDeployment = root.StripDeployment;
 
 pub const StubError = protocol.MethodError || SerializeError || std.Io.Writer.Error || std.Io.Reader.Error || std.mem.Allocator.Error || std.Io.Cancelable;
 
